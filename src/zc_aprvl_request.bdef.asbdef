@@ -1,0 +1,8 @@
+projection;
+strict ( 2 );
+
+define behavior for ZC_APRVL_REQUEST alias AprvlRequest
+{
+  use action approve;
+  use action reject;
+}

@@ -1,0 +1,33 @@
+managed implementation in class ZBP_TBL_AUDIT unique;
+strict ( 2 );
+
+define behavior for ZI_TBL_AUDIT alias AuditLog
+persistent table ztbl_audit
+lock master
+authorization master ( instance )
+etag master ChangedAt
+{
+
+  field ( readonly ) AuditId;
+  field ( readonly ) TableName;
+  field ( readonly ) RecordKey;
+  field ( readonly ) FieldName;
+  field ( readonly ) OldValue;
+  field ( readonly ) NewValue;
+  field ( readonly ) ChangedBy;
+  field ( readonly ) ChangedAt;
+  field ( readonly ) ActionType;
+
+  mapping for ztbl_audit corresponding
+  {
+    AuditId    = audit_id;
+    TableName  = table_name;
+    RecordKey  = record_key;
+    FieldName  = field_name;
+    OldValue   = old_value;
+    NewValue   = new_value;
+    ChangedBy  = changed_by;
+    ChangedAt  = changed_at;
+    ActionType = action_type;
+  }
+}

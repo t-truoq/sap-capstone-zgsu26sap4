@@ -1,0 +1,8 @@
+@EndUserText.label: 'Service Definition for Table Config'
+define service ZSD_TBL_CONFIG {
+  expose ZC_TBL_CONFIG as TableConfig;
+  expose ZC_FLD_CONFIG as FieldConfig;
+  expose ZC_TBL_AUDIT as AuditLog;
+  expose ZI_SH_TABLE_NAME as TableNameVH;
+  expose ZC_APRVL_REQUEST as ApprovalRequest;
+}

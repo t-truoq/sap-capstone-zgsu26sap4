@@ -1,0 +1,6 @@
+abstract;
+strict ( 2 );
+
+define behavior for ZDT_EXCEL_COMMIT_REQ alias ExcelCommitReq
+{
+}

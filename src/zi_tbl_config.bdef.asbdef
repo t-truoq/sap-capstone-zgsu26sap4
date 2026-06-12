@@ -1,0 +1,85 @@
+managed implementation in class ZBP_TBL_CONFIG unique;
+strict ( 2 );
+with draft;
+
+define behavior for ZI_TBL_CONFIG alias TblConfig
+persistent table ztbl_config
+draft table ztbl_config_d
+lock master total etag ActiveFlag
+authorization master ( instance )
+etag master ActiveFlag
+{
+  create;
+  update;
+  delete;
+
+  draft action Activate;
+  draft action Discard;
+  draft action Edit;
+  draft action Resume;
+  draft determine action Prepare {
+    validation validateTableName;
+    validation validateFldConfig;
+  }
+
+  field ( numbering : managed, readonly ) ConfigUuid;
+  field ( readonly : update ) TableName;
+
+  validation validateTableName on save { create; }
+  validation validateFldConfig on save { create; update; }
+  determination fillDescription  on modify { field TableName; }
+  determination fillFieldConfig  on modify { field TableName; }
+  action getTableData  parameter ZDT_TABLE_DATA_REQ result [1] ZDT_TABLE_DATA_RES;
+  action createRecord  parameter ZDT_CRUD_REQ       result [1] ZDT_CRUD_RES;
+  action updateRecord  parameter ZDT_CRUD_REQ       result [1] ZDT_CRUD_RES;
+  action deleteRecord  parameter ZDT_CRUD_REQ       result [1] ZDT_CRUD_RES;
+  action getDomainValues parameter ZDT_DOMAIN_VAL_REQ result [1] ZDT_DOMAIN_VAL_RES;
+  action getFieldMeta    parameter ZDT_TABLE_DATA_REQ result [1] ZDT_FIELDMETA_RES;
+  association _FieldConfig { create; with draft; }
+
+  mapping for ztbl_config corresponding
+  {
+    ConfigUuid       = config_uuid;
+    TableName        = table_name;
+    Description      = description;
+    ApprovalRequired = approval_required;
+    ActiveFlag       = active_flag;
+  }
+}
+
+define behavior for ZI_FLD_CONFIG alias FldConfig
+persistent table zfld_config
+draft table zfld_config_d
+lock dependent by _TblConfig
+authorization dependent by _TblConfig
+etag master HiddenFlag
+{
+  update;
+  delete;
+
+  field ( readonly ) TableName;
+  field ( readonly ) FieldName;
+  field ( readonly ) IsKeyField;
+  field ( readonly ) ConfigUuid;
+
+  validation validateDisplayOrder on save { create; update; }
+  validation validateDomainName   on save { create; update; }
+  determination fillLabelText     on modify { field FieldName; }
+
+  association _TblConfig { with draft; }
+
+  mapping for zfld_config corresponding
+  {
+    TableName     = table_name;
+    FieldName     = field_name;
+    ConfigUuid    = config_uuid;
+    FieldType     = field_type;
+    DomainName    = domain_name;
+    MandatoryFlag = mandatory_flag;
+    DisplayOrder  = display_order;
+    LabelText     = label_text;
+    IsKeyField    = is_key_field;
+    ReadonlyFlag  = readonly_flag;
+    HiddenFlag    = hidden_flag;
+  }
+}

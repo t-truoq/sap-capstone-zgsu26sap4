@@ -1,0 +1,13 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "ZI_TBL_CONFIG"
+    ],
+    "ASSOCIATED": [
+      "ZC_FLD_CONFIG"
+    ],
+    "BASE": [
+      "ZI_TBL_CONFIG"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+unmanaged implementation in class zbp_i_excel_pipeline unique;
+strict ( 2 );
+
+define behavior for ZI_EXCEL_PIPELINE alias ExcelPipeline
+lock master
+authorization master ( global )
+{
+  action downloadExcel parameter ZDT_EXCEL_DOWNLOAD_REQ result [1] ZDT_EXCEL_DOWNLOAD_RES;
+  action uploadExcel   parameter ZDT_EXCEL_UPLOAD_REQ   result [0..*] ZDT_EXCEL_DIFF_ROW;
+  action confirmImport parameter ZDT_EXCEL_COMMIT_REQ   result [1] ZDT_EXCEL_COMMIT_RES;
+}

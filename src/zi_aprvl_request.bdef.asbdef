@@ -1,0 +1,44 @@
+managed implementation in class ZBP_APRVL_REQUEST unique;
+strict ( 2 );
+
+define behavior for ZI_APRVL_REQUEST alias AprvlRequest
+persistent table ztbl_aprvl
+lock master
+authorization master ( instance )
+etag master Status
+{
+  update;
+  delete;
+
+  action approve parameter ZDT_APRVL_INPUT result [1] ZDT_CRUD_RESULT;
+  action reject  parameter ZDT_APRVL_INPUT result [1] ZDT_CRUD_RESULT;
+
+  field ( readonly ) AprvlId;
+  field ( readonly ) TableName;
+  field ( readonly ) ActionType;
+  field ( readonly ) SubmittedBy;
+  field ( readonly ) SubmittedAt;
+  field ( readonly ) NewData;
+  field ( readonly ) OldData;
+  field ( readonly ) RecordKey;
+  field ( readonly ) ApprovedBy;
+  field ( readonly ) ApprovedAt;
+  field ( readonly ) AprvlComment;
+  field ( readonly ) Status;
+
+  mapping for ztbl_aprvl corresponding
+  {
+    AprvlId      = aprvl_id;
+    TableName    = table_name;
+    RecordKey    = record_key;
+    ActionType   = action_type;
+    Status       = status;
+    NewData      = new_data;
+    OldData      = old_data;
+    SubmittedBy  = submitted_by;
+    SubmittedAt  = submitted_at;
+    ApprovedBy   = approved_by;
+    ApprovedAt   = approved_at;
+    AprvlComment = aprvl_comment;
+  }
+}
