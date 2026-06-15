@@ -1,0 +1,4 @@
+@EndUserText.label: 'Excel Pipeline OData Service'
+define service ZSD_EXCEL_PIPELINE {
+  expose ZC_EXCEL_PIPELINE as ExcelPipeline;
+}

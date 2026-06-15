@@ -1,0 +1,9 @@
+projection;
+strict ( 2 );
+
+define behavior for ZC_EXCEL_PIPELINE alias ExcelPipeline
+{
+  use action downloadExcel;
+  use action uploadExcel;
+  use action confirmImport;
+}
