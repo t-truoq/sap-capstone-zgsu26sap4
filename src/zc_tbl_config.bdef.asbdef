@@ -4,29 +4,32 @@ use draft;
 
 define behavior for ZC_TBL_CONFIG alias TblConfig
 {
-  use create;
-  use update;
-  use delete;
+ use create;
+ use update;
+ use delete;
 
-  use action Activate;
-  use action Discard;
-  use action Edit;
-  use action Resume;
-  use action Prepare;
+ use action Activate;
+ use action Discard;
+ use action Edit;
+ use action Resume;
+ use action Prepare;
 
-  use action getTableData;
-  use action createRecord;
-  use action updateRecord;
-  use action deleteRecord;
-  use action getDomainValues;
-  use action getFieldMeta;
-  use association _FieldConfig { create; with draft; }
+ use action getTableData;
+ use action createRecord;
+ use action updateRecord;
+ use action deleteRecord;
+ use action getDomainValues;
+ use action getFieldMeta;
+
+ use action getRepositoryInfo;
+
+ use association _FieldConfig { create; with draft; }
 }
 
 define behavior for ZC_FLD_CONFIG alias FldConfig
 {
-  use update;
-  use delete;
+ use update;
+ use delete;
 
-  use association _TblConfig { with draft; }
+ use association _TblConfig { with draft; }
 }
