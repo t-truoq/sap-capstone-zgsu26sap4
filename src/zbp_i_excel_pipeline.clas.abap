@@ -1,0 +1,5 @@
+CLASS zbp_i_excel_pipeline DEFINITION PUBLIC ABSTRACT FINAL FOR BEHAVIOR OF zi_excel_pipeline.
+ENDCLASS.
+
+CLASS zbp_i_excel_pipeline IMPLEMENTATION.
+ENDCLASS.
