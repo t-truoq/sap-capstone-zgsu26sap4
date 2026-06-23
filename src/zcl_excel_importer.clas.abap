@@ -36,6 +36,7 @@ CLASS zcl_excel_importer DEFINITION
     CLASS-METHODS map_columns
       IMPORTING io_worksheet   TYPE REF TO zcl_excel_worksheet
                 iv_max_col     TYPE i
+                iv_table_name  TYPE tabname
                 it_fields      TYPE zcl_table_inspector=>tt_field_info
       EXPORTING et_colmap      TYPE tt_colmap
                 et_header_cols TYPE tt_colnum
@@ -86,6 +87,7 @@ CLASS zcl_excel_importer IMPLEMENTATION.
     map_columns(
       EXPORTING io_worksheet   = lo_ws
                 iv_max_col     = lv_max_col
+                iv_table_name  = iv_table_name
                 it_fields      = lt_fields
       IMPORTING et_colmap      = lt_colmap
                 et_header_cols = lt_header_cols
@@ -214,17 +216,22 @@ CLASS zcl_excel_importer IMPLEMENTATION.
 
         IF lv_found = abap_false.
           APPEND |Cột '{ lv_value }' không khớp field nào → bỏ qua.| TO et_messages.
-        ELSEIF zcl_excel_types=>is_admin_field( lv_match ) = abap_true.
-          " Field hệ thống quản lý → không import
-          APPEND |Cột '{ lv_value }' ({ lv_match }) bị bỏ qua vì là field hệ thống tự quản lý.| TO et_messages.
         ELSE.
-          " Label trùng → cùng map về 1 field. Chỉ nhận cột đầu, cột sau cảnh báo.
-          READ TABLE et_colmap TRANSPORTING NO FIELDS WITH KEY fieldname = lv_match.
-          IF sy-subrc = 0.
-            APPEND |Cột '{ lv_value }' map trùng field { lv_match } → bỏ qua cột lặp.| TO et_messages.
+          READ TABLE it_fields INTO DATA(ls_matched) WITH KEY field_name = lv_match.
+          IF sy-subrc = 0 AND zcl_excel_types=>is_parseable_column(
+            is_field      = ls_matched
+            iv_table_name = iv_table_name
+            it_fields     = it_fields ) = abap_false.
+            APPEND |Cột '{ lv_value }' ({ lv_match }) bị bỏ qua (readonly/hidden/hệ thống).| TO et_messages.
           ELSE.
-            APPEND VALUE #( column    = lv_col
-                            fieldname = lv_match ) TO et_colmap.
+            " Label trùng → cùng map về 1 field. Chỉ nhận cột đầu, cột sau cảnh báo.
+            READ TABLE et_colmap TRANSPORTING NO FIELDS WITH KEY fieldname = lv_match.
+            IF sy-subrc = 0.
+              APPEND |Cột '{ lv_value }' map trùng field { lv_match } → bỏ qua cột lặp.| TO et_messages.
+            ELSE.
+              APPEND VALUE #( column    = lv_col
+                              fieldname = lv_match ) TO et_colmap.
+            ENDIF.
           ENDIF.
         ENDIF.
       ENDIF.

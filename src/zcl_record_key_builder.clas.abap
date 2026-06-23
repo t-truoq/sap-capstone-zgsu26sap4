@@ -4,14 +4,14 @@ CLASS zcl_record_key_builder DEFINITION
   PUBLIC SECTION.
     "Tạo WHERE clause động từ danh sách key fields và 1 record
     CLASS-METHODS build_where_clause
-      IMPORTING it_key_fields  TYPE string_table
-                ir_record      TYPE REF TO data
+      IMPORTING it_key_fields   TYPE string_table
+                ir_record       TYPE REF TO data
       RETURNING VALUE(rv_where) TYPE string.
 
     "Tạo JSON key {"FIELD":"VALUE"} cho audit log
     CLASS-METHODS build_key_json
-      IMPORTING it_key_fields     TYPE string_table
-                ir_record         TYPE REF TO data
+      IMPORTING it_key_fields      TYPE string_table
+                ir_record          TYPE REF TO data
       RETURNING VALUE(rv_key_json) TYPE string.
 
 ENDCLASS.
@@ -22,6 +22,11 @@ CLASS zcl_record_key_builder IMPLEMENTATION.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
 
     LOOP AT it_key_fields INTO DATA(lv_key_field).
+
+      IF lv_key_field = 'MANDT' OR lv_key_field = 'CLIENT'.
+        CONTINUE.
+      ENDIF.
+
       ASSIGN COMPONENT lv_key_field OF STRUCTURE <ls_record>
         TO FIELD-SYMBOL(<lv_val>).
       IF sy-subrc <> 0. CONTINUE. ENDIF.
@@ -66,6 +71,11 @@ CLASS zcl_record_key_builder IMPLEMENTATION.
     DATA lt_pairs TYPE string_table.
 
     LOOP AT it_key_fields INTO DATA(lv_key_field).
+
+      IF lv_key_field = 'MANDT' OR lv_key_field = 'CLIENT'.
+        CONTINUE.
+      ENDIF.
+
       ASSIGN COMPONENT lv_key_field OF STRUCTURE <ls_record>
         TO FIELD-SYMBOL(<lv_key_val>).
       IF sy-subrc <> 0. CONTINUE. ENDIF.
@@ -83,6 +93,8 @@ CLASS zcl_record_key_builder IMPLEMENTATION.
       ENDIF.
 
       APPEND |"{ lv_key_field }":"{ lv_val_str }"| TO lt_pairs.
+
+      UNASSIGN <lv_key_val>.
     ENDLOOP.
 
     rv_key_json = `{`.

@@ -6,8 +6,8 @@
 *&---------------------------------------------------------------------*
 REPORT ztest_excel_diff.
 
-PARAMETERS p_table TYPE tabname DEFAULT 'Z251_SCHEDULE'.
-PARAMETERS p_file  TYPE string LOWER CASE DEFAULT 'C:\temp\Z251_SCHEDULE.xlsx'.
+PARAMETERS p_table TYPE tabname DEFAULT 'ZTPC_HEADER'.
+PARAMETERS p_file  TYPE string LOWER CASE DEFAULT 'C:\temp\ZTPC_HEADER.xlsx'.
 
 START-OF-SELECTION.
 
