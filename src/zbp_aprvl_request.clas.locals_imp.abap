@@ -58,16 +58,18 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
           CASE ls_req-actiontype.
 
-            WHEN 'C'.
+                      WHEN 'C'.
               zcl_json_helper=>deserialize(
                 EXPORTING iv_json   = ls_req-newdata
                 CHANGING  ca_record = lo_record
               ).
               ASSIGN lo_record->* TO FIELD-SYMBOL(<ls_rec_c>).
-              ASSIGN COMPONENT 'CLIENT' OF STRUCTURE <ls_rec_c>
-                TO FIELD-SYMBOL(<lv_cli_c>).
-              IF sy-subrc = 0. <lv_cli_c> = sy-mandt. ENDIF.
+              zcl_record_autofill=>on_create(
+                iv_table_name = ls_req-tablename
+                ir_record     = lo_record
+              ).
               INSERT (ls_req-tablename) FROM <ls_rec_c>.
+
 
             WHEN 'U'.
               zcl_json_helper=>deserialize(

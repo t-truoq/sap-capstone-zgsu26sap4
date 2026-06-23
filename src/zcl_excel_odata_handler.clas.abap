@@ -111,7 +111,8 @@ CLASS zcl_excel_odata_handler IMPLEMENTATION.
     " Gọi committer trực tiếp (tránh trùng tên method confirm_import với facade/committer)
     DATA(ls_sum) = zcl_excel_committer=>confirm_import(
                      iv_table_name = CONV tabname( is_req-table_name )
-                     it_diff       = lt_diff ).
+                     it_diff       = lt_diff
+                     iv_do_commit  = abap_false ).
 
     rs_res-inserted_count  = ls_sum-inserted_count.
     rs_res-updated_count   = ls_sum-updated_count.

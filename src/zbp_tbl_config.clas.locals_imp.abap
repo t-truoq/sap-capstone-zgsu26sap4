@@ -213,46 +213,77 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  IF lv_record_data IS INITIAL.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
- table_name = ls_config-tablename
- success = abap_false
- message = 'Record data is empty'
- )
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = 'Record data is empty' )
  ) TO result.
  CONTINUE.
  ENDIF.
 
- DATA(ls_aprvl) = zcl_approval_guard=>check_and_submit(
+ TRY.
+ DATA(lo_desc_create) = CAST cl_abap_structdescr(
+ cl_abap_typedescr=>describe_by_name( ls_config-tablename )
+ ).
+ CATCH cx_root.
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = 'Invalid table' )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
+
+ DATA lo_create TYPE REF TO data.
+ CREATE DATA lo_create TYPE HANDLE lo_desc_create.
+ ASSIGN lo_create->* TO FIELD-SYMBOL(<ls_create>).
+
+ TRY.
+ zcl_json_helper=>deserialize(
+ EXPORTING iv_json = lv_record_data
+ CHANGING ca_record = lo_create
+ ).
+
+ zcl_record_autofill=>on_create(
  iv_table_name = ls_config-tablename
+ ir_record     = lo_create
+ ).
+
+ DATA(lt_create_keys) = zcl_dynamic_table_reader=>get_key_fields( ls_config-tablename ).
+ DATA(lv_create_key) = zcl_record_key_builder=>build_key_json(
+ it_key_fields = lt_create_keys
+ ir_record     = lo_create
+ ).
+
+ lv_record_data = zcl_json_helper=>serialize( <ls_create> ).
+
+ CATCH cx_root INTO DATA(lx_create).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = lx_create->get_text( ) )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
+
+ DATA(ls_aprvl) = zcl_approval_guard=>check_and_submit(
+ iv_table_name  = ls_config-tablename
  iv_action_type = 'C'
- iv_record_key = ''
- iv_new_data = lv_record_data
+ iv_record_key  = CONV #( lv_create_key )
+ iv_new_data    = lv_record_data
  ).
 
  IF ls_aprvl-needs_approval = abap_true.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
- table_name = ls_config-tablename
- success = abap_true
- message = ls_aprvl-message
- )
+ %param = VALUE #( table_name = ls_config-tablename success = abap_true message = ls_aprvl-message )
  ) TO result.
  CONTINUE.
  ENDIF.
 
  DATA(ls_res) = zcl_dyn_record_handler=>create_record(
- iv_table_name = ls_config-tablename
+ iv_table_name  = ls_config-tablename
  iv_record_data = lv_record_data
  ).
 
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
- table_name = ls_config-tablename
- success = ls_res-success
- message = ls_res-message
- )
+ %param = VALUE #( table_name = ls_config-tablename success = ls_res-success message = ls_res-message )
  ) TO result.
 
  ENDLOOP.
