@@ -71,13 +71,29 @@ CLASS zcl_excel_record_builder DEFINITION
       IMPORTING iv_fieldname TYPE fieldname
       CHANGING  cs_record    TYPE any.
 
+    CLASS-METHODS assign_sys_timestamp_val
+      IMPORTING iv_fieldname  TYPE fieldname
+                iv_utclong    TYPE utclong
+                iv_timestampl TYPE timestampl
+      CHANGING  cs_record     TYPE any.
+
+    "! CREATED_AT trống nhưng CHANGED_AT đã có (khác kiểu utclong/timestampl) → copy.
+    CLASS-METHODS ensure_created_at_filled
+      CHANGING cs_record TYPE any.
+
+    CLASS-METHODS copy_timestamp_to_component
+      IMPORTING iv_source_field TYPE fieldname
+                iv_target_field TYPE fieldname
+      CHANGING  cs_record       TYPE any
+      RETURNING VALUE(rv_ok)    TYPE abap_bool.
+
     CLASS-METHODS set_admin_on_insert
       CHANGING cs_record TYPE any.
 
     CLASS-METHODS set_admin_on_update_record
       CHANGING cs_record TYPE any.
 
-    "! JSON Create cho Approve: chỉ business + ENTITY_ID + MANDT (không admin timestamp).
+    "! JSON cho Approve: business + ENTITY_ID + MANDT; giữ TIMESTAMPL admin, bỏ UTCLONG.
     CLASS-METHODS serialize_new_for_approval
       IMPORTING iv_table_name TYPE tabname
                 it_fields     TYPE zcl_table_inspector=>tt_field_info
@@ -88,6 +104,11 @@ CLASS zcl_excel_record_builder DEFINITION
     CLASS-METHODS is_admin_timestamp_field
       IMPORTING iv_fieldname TYPE fieldname
       RETURNING VALUE(rv_skip) TYPE abap_bool.
+
+    CLASS-METHODS is_utclong_field
+      IMPORTING io_sdesc     TYPE REF TO cl_abap_structdescr
+                iv_fieldname TYPE fieldname
+      RETURNING VALUE(rv_utclong) TYPE abap_bool.
 
     CLASS-METHODS append_field_to_approval_json
       IMPORTING iv_table_name TYPE tabname
@@ -397,21 +418,105 @@ CLASS zcl_excel_record_builder IMPLEMENTATION.
 
 
   METHOD assign_sys_timestamp.
+    DATA(lv_utclong) = utclong_current( ).
+    DATA lv_ts TYPE timestampl.
+    GET TIME STAMP FIELD lv_ts.
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname  = iv_fieldname
+                iv_utclong    = lv_utclong
+                iv_timestampl = lv_ts
+      CHANGING  cs_record     = cs_record ).
+  ENDMETHOD.
+
+
+  METHOD assign_sys_timestamp_val.
     ASSIGN COMPONENT iv_fieldname OF STRUCTURE cs_record TO FIELD-SYMBOL(<f>).
     IF sy-subrc <> 0.
       RETURN.
     ENDIF.
+
+    DATA(lo_elem) = CAST cl_abap_elemdescr(
+      cl_abap_typedescr=>describe_by_data( <f> ) ).
+
     TRY.
-        <f> = utclong_current( ).
+        CASE lo_elem->type_kind.
+          WHEN cl_abap_typedescr=>typekind_int8.
+            <f> = iv_utclong.
+          WHEN cl_abap_typedescr=>typekind_packed.
+            <f> = iv_timestampl.
+          WHEN OTHERS.
+            <f> = iv_timestampl.
+        ENDCASE.
       CATCH cx_sy_conversion_not_supported.
-        DATA lv_ts TYPE timestampl.
-        GET TIME STAMP FIELD lv_ts.
         TRY.
-            <f> = lv_ts.
+            <f> = iv_utclong.
           CATCH cx_sy_conversion_not_supported.
-            RETURN.
+            TRY.
+                <f> = iv_timestampl.
+              CATCH cx_sy_conversion_not_supported.
+            ENDTRY.
         ENDTRY.
     ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD copy_timestamp_to_component.
+    ASSIGN COMPONENT iv_target_field OF STRUCTURE cs_record TO FIELD-SYMBOL(<tgt>).
+    ASSIGN COMPONENT iv_source_field OF STRUCTURE cs_record TO FIELD-SYMBOL(<src>).
+    IF sy-subrc <> 0 OR <src> IS INITIAL OR <tgt> IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        <tgt> = <src>.
+        rv_ok = abap_true.
+        RETURN.
+      CATCH cx_sy_conversion_not_supported.
+    ENDTRY.
+
+    DATA(lo_tgt) = CAST cl_abap_elemdescr( cl_abap_typedescr=>describe_by_data( <tgt> ) ).
+    DATA(lo_src) = CAST cl_abap_elemdescr( cl_abap_typedescr=>describe_by_data( <src> ) ).
+
+    TRY.
+        IF lo_src->type_kind = cl_abap_typedescr=>typekind_int8
+           AND lo_tgt->type_kind = cl_abap_typedescr=>typekind_packed.
+          <tgt> = cl_abap_tstmp=>utclong2tstmp( CONV utclong( <src> ) ).
+          rv_ok = abap_true.
+          RETURN.
+        ENDIF.
+        IF lo_src->type_kind = cl_abap_typedescr=>typekind_packed
+           AND lo_tgt->type_kind = cl_abap_typedescr=>typekind_int8.
+          <tgt> = cl_abap_tstmp=>tstmp2utclong( CONV timestampl( <src> ) ).
+          rv_ok = abap_true.
+          RETURN.
+        ENDIF.
+      CATCH cx_root.
+    ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD ensure_created_at_filled.
+    ASSIGN COMPONENT 'CREATED_AT' OF STRUCTURE cs_record TO FIELD-SYMBOL(<crt>).
+    IF sy-subrc <> 0 OR <crt> IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    IF copy_timestamp_to_component(
+         EXPORTING iv_source_field = 'CHANGED_AT'
+                   iv_target_field = 'CREATED_AT'
+         CHANGING  cs_record       = cs_record ) = abap_true.
+      RETURN.
+    ENDIF.
+    IF copy_timestamp_to_component(
+         EXPORTING iv_source_field = 'LAST_CHANGED_AT'
+                   iv_target_field = 'CREATED_AT'
+         CHANGING  cs_record       = cs_record ) = abap_true.
+      RETURN.
+    ENDIF.
+    copy_timestamp_to_component(
+      EXPORTING iv_source_field = 'LOCAL_LAST_CHANGED_AT'
+                iv_target_field = 'CREATED_AT'
+      CHANGING  cs_record       = cs_record ).
   ENDMETHOD.
 
 
@@ -423,10 +528,25 @@ CLASS zcl_excel_record_builder IMPLEMENTATION.
     IF sy-subrc = 0. <f> = sy-uname. ENDIF.
     ASSIGN COMPONENT 'CHANGED_BY' OF STRUCTURE cs_record TO <f>.
     IF sy-subrc = 0. <f> = sy-uname. ENDIF.
-    assign_sys_timestamp( EXPORTING iv_fieldname = 'CREATED_AT' CHANGING cs_record = cs_record ).
-    assign_sys_timestamp( EXPORTING iv_fieldname = 'LAST_CHANGED_AT' CHANGING cs_record = cs_record ).
-    assign_sys_timestamp( EXPORTING iv_fieldname = 'LOCAL_LAST_CHANGED_AT' CHANGING cs_record = cs_record ).
-    assign_sys_timestamp( EXPORTING iv_fieldname = 'CHANGED_AT' CHANGING cs_record = cs_record ).
+
+    DATA(lv_utclong) = utclong_current( ).
+    DATA lv_ts TYPE timestampl.
+    GET TIME STAMP FIELD lv_ts.
+
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname = 'CREATED_AT' iv_utclong = lv_utclong iv_timestampl = lv_ts
+      CHANGING  cs_record = cs_record ).
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname = 'LAST_CHANGED_AT' iv_utclong = lv_utclong iv_timestampl = lv_ts
+      CHANGING  cs_record = cs_record ).
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname = 'LOCAL_LAST_CHANGED_AT' iv_utclong = lv_utclong iv_timestampl = lv_ts
+      CHANGING  cs_record = cs_record ).
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname = 'CHANGED_AT' iv_utclong = lv_utclong iv_timestampl = lv_ts
+      CHANGING  cs_record = cs_record ).
+
+    ensure_created_at_filled( CHANGING cs_record = cs_record ).
   ENDMETHOD.
 
 
@@ -436,9 +556,20 @@ CLASS zcl_excel_record_builder IMPLEMENTATION.
     IF sy-subrc = 0. <f> = sy-uname. ENDIF.
     ASSIGN COMPONENT 'CHANGED_BY' OF STRUCTURE cs_record TO <f>.
     IF sy-subrc = 0. <f> = sy-uname. ENDIF.
-    assign_sys_timestamp( EXPORTING iv_fieldname = 'LAST_CHANGED_AT' CHANGING cs_record = cs_record ).
-    assign_sys_timestamp( EXPORTING iv_fieldname = 'LOCAL_LAST_CHANGED_AT' CHANGING cs_record = cs_record ).
-    assign_sys_timestamp( EXPORTING iv_fieldname = 'CHANGED_AT' CHANGING cs_record = cs_record ).
+
+    DATA(lv_utclong) = utclong_current( ).
+    DATA lv_ts TYPE timestampl.
+    GET TIME STAMP FIELD lv_ts.
+
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname = 'LAST_CHANGED_AT' iv_utclong = lv_utclong iv_timestampl = lv_ts
+      CHANGING  cs_record = cs_record ).
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname = 'LOCAL_LAST_CHANGED_AT' iv_utclong = lv_utclong iv_timestampl = lv_ts
+      CHANGING  cs_record = cs_record ).
+    assign_sys_timestamp_val(
+      EXPORTING iv_fieldname = 'CHANGED_AT' iv_utclong = lv_utclong iv_timestampl = lv_ts
+      CHANGING  cs_record = cs_record ).
   ENDMETHOD.
 
 
@@ -565,9 +696,18 @@ CLASS zcl_excel_record_builder IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD is_utclong_field.
+    DATA(lo_elem) = CAST cl_abap_elemdescr(
+      io_sdesc->get_component_type( iv_fieldname ) ).
+    rv_utclong = COND #(
+      WHEN lo_elem->type_kind = cl_abap_typedescr=>typekind_int8
+      THEN abap_true ELSE abap_false ).
+  ENDMETHOD.
+
+
   METHOD serialize_new_for_approval.
-    " Serialize qua zcl_json_helper; bỏ admin timestamp khỏi JSON (utclong không round-trip → CX_SY_CONVERSION_NO_DATE_TIME).
-    " CREATED_BY/CHANGED_BY vẫn có; CREATED_AT do ZBP set lúc INSERT hoặc chấp nhận null sau Approve.
+    " ZBP trên SAP không gọi apply_admin_on_insert → CREATED_AT (TIMESTAMPL) phải có trong JSON.
+    " Chỉ bỏ admin timestamp kiểu UTCLONG (int8): /ui2/cl_json không round-trip → CX_SY_CONVERSION_NO_DATE_TIME.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<wa>).
     DATA lr_copy TYPE REF TO data.
     CREATE DATA lr_copy LIKE ir_record->*.
@@ -577,11 +717,17 @@ CLASS zcl_excel_record_builder IMPLEMENTATION.
     DATA(lo_sdesc) = CAST cl_abap_structdescr(
       cl_abap_typedescr=>describe_by_data( <wa> ) ).
     LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_comp).
-      IF is_admin_timestamp_field( CONV fieldname( ls_comp-name ) ) = abap_true.
-        ASSIGN COMPONENT ls_comp-name OF STRUCTURE <cpy> TO FIELD-SYMBOL(<ts>).
-        IF sy-subrc = 0.
-          CLEAR <ts>.
-        ENDIF.
+      IF is_admin_timestamp_field( CONV fieldname( ls_comp-name ) ) = abap_false.
+        CONTINUE.
+      ENDIF.
+      IF is_utclong_field(
+           io_sdesc     = lo_sdesc
+           iv_fieldname = CONV fieldname( ls_comp-name ) ) = abap_false.
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT ls_comp-name OF STRUCTURE <cpy> TO FIELD-SYMBOL(<ts>).
+      IF sy-subrc = 0.
+        CLEAR <ts>.
       ENDIF.
     ENDLOOP.
 

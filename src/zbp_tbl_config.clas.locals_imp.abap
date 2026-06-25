@@ -44,6 +44,15 @@ CLASS lhc_tblconfig DEFINITION INHERITING FROM cl_abap_behavior_handler.
  IMPORTING iv_rollname TYPE rollname
  RETURNING VALUE(rv_label) TYPE dd04t-reptext.
 
+
+ METHODS getfkvalues FOR MODIFY
+  IMPORTING keys FOR ACTION tblconfig~getfkvalues RESULT result.
+
+
+  "Ai helper
+  METHODS getaidescription FOR MODIFY
+  IMPORTING keys FOR ACTION tblconfig~getaidescription RESULT result.
+
 ENDCLASS.
 
 CLASS lhc_tblconfig IMPLEMENTATION.
@@ -674,121 +683,151 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ENDMETHOD.
 
  METHOD getfieldmeta.
- READ ENTITIES OF zi_tbl_config IN LOCAL MODE
- ENTITY tblconfig
- FIELDS ( tablename )
- WITH CORRESPONDING #( keys )
- RESULT DATA(lt_config).
 
- LOOP AT lt_config INTO DATA(ls_config).
- IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+  READ ENTITIES OF zi_tbl_config IN LOCAL MODE
+    ENTITY tblconfig
+      FIELDS ( tablename )
+      WITH CORRESPONDING #( keys )
+    RESULT DATA(lt_config).
 
- SELECT fieldname, position, keyflag, inttype, leng, decimals, rollname, domname
- FROM dd03l
- WHERE tabname = @ls_config-tablename
- AND as4local = 'A'
- AND fieldname NOT LIKE '.%'
- ORDER BY position
- INTO TABLE @DATA(lt_dd03l).
+  LOOP AT lt_config INTO DATA(ls_config).
 
- IF lt_dd03l IS INITIAL.
- APPEND VALUE #(
- %tky = ls_config-%tky
- %param = VALUE #(
- table_name = ls_config-tablename
- error_msg = |No fields found for table { ls_config-tablename }|
- )
- ) TO result.
- CONTINUE.
- ENDIF.
+    IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
 
- SELECT field_name, label_text, hidden_flag, display_order, field_type, domain_name
- FROM zfld_config
- WHERE table_name = @ls_config-tablename
- INTO TABLE @DATA(lt_fld_config).
+    SELECT fieldname, position, keyflag, inttype, leng, decimals, rollname, domname
+      FROM dd03l
+      WHERE tabname  = @ls_config-tablename
+        AND as4local = 'A'
+        AND fieldname NOT LIKE '.%'
+      ORDER BY position
+      INTO TABLE @DATA(lt_dd03l).
 
- TYPES: BEGIN OF ty_field_meta,
- field_name TYPE string,
- abap_type TYPE string,
- fe_type TYPE string,
- length TYPE i,
- decimals TYPE i,
- is_key TYPE abap_bool,
- is_mandatory TYPE abap_bool,
- label TYPE string,
- domain_name TYPE string,
- display_order TYPE i,
- is_hidden TYPE abap_bool,
- END OF ty_field_meta.
- DATA lt_meta TYPE TABLE OF ty_field_meta.
+    IF lt_dd03l IS INITIAL.
+      APPEND VALUE #(
+        %tky   = ls_config-%tky
+        %param = VALUE #( table_name = ls_config-tablename
+                          error_msg  = |No fields found for table { ls_config-tablename }| )
+      ) TO result.
+      CONTINUE.
+    ENDIF.
 
- LOOP AT lt_dd03l INTO DATA(ls_dd).
- IF ls_dd-fieldname = 'CLIENT' OR ls_dd-fieldname = 'MANDT'. CONTINUE. ENDIF.
+    SELECT field_name, label_text, hidden_flag, display_order, field_type, domain_name
+      FROM zfld_config
+      WHERE table_name = @ls_config-tablename
+      INTO TABLE @DATA(lt_fld_config).
 
- READ TABLE lt_fld_config INTO DATA(ls_fld_cfg)
- WITH KEY field_name = ls_dd-fieldname.
- DATA(lv_has_cfg) = COND abap_bool( WHEN sy-subrc = 0 THEN abap_true ELSE abap_false ).
+    " 1 SELECT cho toàn bộ FK field mappings của bảng, không SELECT trong loop
+    " JOIN DD08L + DD05S (active):
+    "   DD08L: TABNAME=bảng con, FIELDNAME=tên FK relationship, CHECKTABLE=bảng cha
+    "   DD05S: FORKEY=field bên bảng con, FORTABLE=bảng cha
+    SELECT DISTINCT dd05s~forkey, dd08l~checktable AS fortable
+      FROM dd08l
+      INNER JOIN dd05s
+        ON  dd05s~tabname   = dd08l~tabname
+        AND dd05s~fieldname = dd08l~fieldname
+        AND dd05s~as4local  = dd08l~as4local
+      WHERE dd08l~tabname    = @ls_config-tablename
+        AND dd08l~as4local   = 'A'
+        AND dd08l~checktable IS NOT INITIAL
+      INTO TABLE @DATA(lt_fk_fields).
 
- DATA(lv_fe_type) = SWITCH string( ls_dd-inttype
- WHEN 'D' THEN 'date'
- WHEN 'T' THEN 'time'
- WHEN 'I' THEN 'integer'
- WHEN 'F' THEN 'decimal'
- WHEN 'P' THEN 'decimal'
- WHEN 'X' THEN
- COND string(
- WHEN ls_dd-leng = 1 THEN 'boolean'
- WHEN ls_dd-leng = 16 THEN 'uuid'
- ELSE 'text'
- )
- ELSE COND string(
- WHEN ls_dd-domname IS NOT INITIAL THEN 'domain'
- ELSE 'text'
- )
- ).
+    TYPES: BEGIN OF ty_field_meta,
+             field_name    TYPE string,
+             abap_type     TYPE string,
+             fe_type       TYPE string,   " 'fk_select' nếu FK key -> FE render dropdown
+             length        TYPE i,
+             decimals      TYPE i,
+             is_key        TYPE abap_bool,
+             is_mandatory  TYPE abap_bool,
+             label         TYPE string,
+             domain_name   TYPE string,
+             display_order TYPE i,
+             is_hidden     TYPE abap_bool,
+             is_fk_key     TYPE abap_bool, " true -> FE gọi gettabledata(fk_ref_table)
+             fk_ref_table  TYPE string,    " tên bảng cha (vd: ZTPC_HEADER)
+           END OF ty_field_meta.
 
- DATA lv_label TYPE string.
- IF lv_has_cfg = abap_true AND ls_fld_cfg-label_text IS NOT INITIAL.
- lv_label = ls_fld_cfg-label_text.
- ELSEIF ls_dd-rollname IS NOT INITIAL.
- lv_label = get_label_from_dd04t( ls_dd-rollname ).
- ENDIF.
- IF lv_label IS INITIAL. lv_label = ls_dd-fieldname. ENDIF.
+    DATA lt_meta TYPE TABLE OF ty_field_meta.
 
- APPEND VALUE ty_field_meta(
- field_name = ls_dd-fieldname
- abap_type = ls_dd-inttype
- fe_type = lv_fe_type
- length = ls_dd-leng
- decimals = ls_dd-decimals
- is_key = ls_dd-keyflag
- is_mandatory = ls_dd-keyflag
- label = lv_label
- domain_name = COND #( WHEN lv_fe_type = 'domain' THEN ls_dd-domname ELSE `` )
- display_order = COND i( WHEN lv_has_cfg = abap_true THEN ls_fld_cfg-display_order
- ELSE ls_dd-position )
- is_hidden = COND abap_bool( WHEN lv_has_cfg = abap_true THEN ls_fld_cfg-hidden_flag
- ELSE abap_false )
- ) TO lt_meta.
- ENDLOOP.
+    LOOP AT lt_dd03l INTO DATA(ls_dd).
 
- SORT lt_meta BY display_order.
+      IF ls_dd-fieldname = 'CLIENT' OR ls_dd-fieldname = 'MANDT'. CONTINUE. ENDIF.
 
- DATA(lv_meta_json) = /ui2/cl_json=>serialize(
- data = lt_meta
- pretty_name = /ui2/cl_json=>pretty_mode-none
- ).
+      READ TABLE lt_fld_config INTO DATA(ls_fld_cfg)
+        WITH KEY field_name = ls_dd-fieldname.
+      DATA(lv_has_cfg) = COND abap_bool( WHEN sy-subrc = 0 THEN abap_true ELSE abap_false ).
 
- APPEND VALUE #(
- %tky = ls_config-%tky
- %param = VALUE #(
- table_name = ls_config-tablename
- meta_json = lv_meta_json
- )
- ) TO result.
+      DATA(lv_fe_type) = SWITCH string( ls_dd-inttype
+        WHEN 'D' THEN 'date'
+        WHEN 'T' THEN 'time'
+        WHEN 'I' THEN 'integer'
+        WHEN 'F' THEN 'decimal'
+        WHEN 'P' THEN 'decimal'
+        WHEN 'X' THEN COND string( WHEN ls_dd-leng = 1  THEN 'boolean'
+                                   WHEN ls_dd-leng = 16 THEN 'uuid'
+                                   ELSE 'text' )
+        ELSE COND string( WHEN ls_dd-domname IS NOT INITIAL THEN 'domain'
+                          ELSE 'text' )
+      ).
 
- ENDLOOP.
- ENDMETHOD.
+      DATA lv_label TYPE string.
+      IF lv_has_cfg = abap_true AND ls_fld_cfg-label_text IS NOT INITIAL.
+        lv_label = ls_fld_cfg-label_text.
+      ELSEIF ls_dd-rollname IS NOT INITIAL.
+        lv_label = get_label_from_dd04t( ls_dd-rollname ).
+      ENDIF.
+      IF lv_label IS INITIAL. lv_label = ls_dd-fieldname. ENDIF.
+
+      " FK lookup từ lt_fk_fields đã JOIN sẵn ở trên (không SELECT lại trong loop)
+      DATA lv_is_fk_key    TYPE abap_bool VALUE abap_false.
+      DATA lv_fk_ref_table TYPE string.
+
+      IF ls_dd-keyflag = 'X'.
+        READ TABLE lt_fk_fields INTO DATA(ls_fk)
+          WITH KEY forkey = ls_dd-fieldname.
+        IF sy-subrc = 0.
+          lv_is_fk_key    = abap_true.
+          lv_fk_ref_table = CONV string( ls_fk-fortable ).
+          lv_fe_type      = 'fk_select'.
+        ENDIF.
+      ENDIF.
+
+      APPEND VALUE ty_field_meta(
+        field_name    = ls_dd-fieldname
+        abap_type     = ls_dd-inttype
+        fe_type       = lv_fe_type
+        length        = ls_dd-leng
+        decimals      = ls_dd-decimals
+        is_key        = ls_dd-keyflag
+        is_mandatory  = ls_dd-keyflag
+        label         = lv_label
+        domain_name   = COND #( WHEN lv_fe_type = 'domain' THEN ls_dd-domname ELSE `` )
+        display_order = COND i( WHEN lv_has_cfg = abap_true THEN ls_fld_cfg-display_order
+                                ELSE ls_dd-position )
+        is_hidden     = COND abap_bool( WHEN lv_has_cfg = abap_true THEN ls_fld_cfg-hidden_flag
+                                        ELSE abap_false )
+        is_fk_key     = lv_is_fk_key
+        fk_ref_table  = lv_fk_ref_table
+      ) TO lt_meta.
+
+    ENDLOOP.
+
+    SORT lt_meta BY display_order.
+
+    DATA(lv_meta_json) = /ui2/cl_json=>serialize(
+      data        = lt_meta
+      pretty_name = /ui2/cl_json=>pretty_mode-none
+    ).
+
+    APPEND VALUE #(
+      %tky   = ls_config-%tky
+      %param = VALUE #( table_name = ls_config-tablename
+                        meta_json  = lv_meta_json )
+    ) TO result.
+
+  ENDLOOP.
+
+ENDMETHOD.
 
  METHOD gettabledata.
  READ ENTITIES OF zi_tbl_config IN LOCAL MODE
@@ -911,5 +950,192 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ) TO result.
  ENDLOOP.
  ENDMETHOD.
+METHOD getfkvalues.
 
+  LOOP AT keys INTO DATA(ls_key).
+
+    DATA(lv_child_table) = CONV tabname( ls_key-%param-table_name ).
+    DATA(lv_fk_field)    = CONV fieldname( ls_key-%param-field_name ).
+
+    IF lv_child_table IS INITIAL OR lv_fk_field IS INITIAL.
+      APPEND VALUE #(
+        %tky   = ls_key-%tky
+        %param = VALUE #( error_msg = 'table_name and field_name are required' )
+      ) TO result.
+      CONTINUE.
+    ENDIF.
+
+    " ── Bước 1: Tra DD08L + DD05S tìm bảng cha ──────────────────────────
+    DATA lv_ref_table TYPE tabname.
+
+    SELECT SINGLE dd08l~checktable
+      FROM dd08l
+      INNER JOIN dd05s
+        ON  dd05s~tabname   = dd08l~tabname
+        AND dd05s~fieldname = dd08l~fieldname
+        AND dd05s~as4local  = dd08l~as4local
+      WHERE dd08l~tabname    = @lv_child_table
+        AND dd08l~as4local   = 'A'
+        AND dd08l~checktable IS NOT INITIAL
+        AND dd05s~forkey     = @lv_fk_field
+      INTO @lv_ref_table.
+
+    IF sy-subrc <> 0 OR lv_ref_table IS INITIAL.
+      APPEND VALUE #(
+        %tky   = ls_key-%tky
+        %param = VALUE #(
+          error_msg = |Field { lv_fk_field } is not a FK in table { lv_child_table }|
+        )
+      ) TO result.
+      CONTINUE.
+    ENDIF.
+
+    " ── Bước 2: Tìm key_field (FORSTRING = field tương ứng bên bảng cha) ─
+    DATA lv_key_field TYPE string.
+
+    SELECT SINGLE dd05s~forstring
+      FROM dd05s
+      INNER JOIN dd08l
+        ON  dd08l~tabname   = dd05s~tabname
+        AND dd08l~fieldname = dd05s~fieldname
+        AND dd08l~as4local  = dd05s~as4local
+      WHERE dd05s~tabname   = @lv_child_table
+        AND dd05s~as4local  = 'A'
+        AND dd05s~forkey    = @lv_fk_field
+      INTO @DATA(lv_forstring).
+
+    IF sy-subrc = 0 AND lv_forstring IS NOT INITIAL.
+      lv_key_field = lv_forstring.
+    ELSE.
+      DATA(lt_pk) = zcl_dynamic_table_reader=>get_key_fields( lv_ref_table ).
+      IF lt_pk IS NOT INITIAL.
+        lv_key_field = lt_pk[ 1 ].
+      ENDIF.
+    ENDIF.
+
+    " ── Bước 3: Tìm display_field ────────────────────────────────────────
+    DATA lv_display_field TYPE string.
+
+    SELECT fieldname, inttype, leng
+      FROM dd03l
+      WHERE tabname   = @lv_ref_table
+        AND as4local  = 'A'
+        AND keyflag   = ''
+        AND fieldname <> 'CLIENT'
+        AND fieldname <> 'MANDT'
+        AND fieldname NOT LIKE '.%'
+      ORDER BY position
+      INTO TABLE @DATA(lt_ref_fields).
+
+    LOOP AT lt_ref_fields INTO DATA(ls_ref).
+      IF ls_ref-inttype = 'C' AND ls_ref-leng <> 32.
+        lv_display_field = ls_ref-fieldname.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+    IF lv_display_field IS INITIAL AND lt_ref_fields IS NOT INITIAL.
+      lv_display_field = lt_ref_fields[ 1 ]-fieldname.
+    ENDIF.
+
+    " ── Bước 4: Đọc data từ bảng cha ────────────────────────────────────
+    TRY.
+        DATA(lo_data) = zcl_dynamic_table_reader=>get_table_data(
+          iv_table_name = lv_ref_table
+          iv_max_rows   = 200
+        ).
+
+        ASSIGN lo_data->* TO FIELD-SYMBOL(<lt_data>).
+        DATA(lv_json) = zcl_json_helper=>serialize( <lt_data> ).
+
+        APPEND VALUE #(
+          %tky   = ls_key-%tky
+          %param = VALUE #(
+            table_name    = ls_key-%param-table_name
+            field_name    = ls_key-%param-field_name
+            ref_table     = CONV string( lv_ref_table )
+            data_json     = lv_json
+            display_field = lv_display_field
+            key_field     = lv_key_field
+          )
+        ) TO result.
+
+      CATCH cx_sy_dynamic_osql_error INTO DATA(lx_sql).
+        APPEND VALUE #(
+          %tky   = ls_key-%tky
+          %param = VALUE #( error_msg = lx_sql->get_text( ) )
+        ) TO result.
+
+      CATCH cx_root INTO DATA(lx_root).
+        APPEND VALUE #(
+          %tky   = ls_key-%tky
+          %param = VALUE #( error_msg = lx_root->get_text( ) )
+        ) TO result.
+    ENDTRY.
+
+  ENDLOOP.
+
+ENDMETHOD.
+
+
+
+METHOD getaidescription.
+
+  LOOP AT keys INTO DATA(ls_key).
+
+    DATA(lv_table) = CONV tabname( ls_key-%param-table_name ).
+
+    IF lv_table IS INITIAL.
+      APPEND VALUE #(
+        %tky   = ls_key-%tky
+        %param = VALUE #( error_msg = 'table_name is required' )
+      ) TO result.
+      CONTINUE.
+    ENDIF.
+
+    " Kiểm tra bảng có tồn tại không
+    IF zcl_table_inspector=>table_exists( lv_table ) = abap_false.
+      APPEND VALUE #(
+        %tky   = ls_key-%tky
+        %param = VALUE #( error_msg = |Table { lv_table } does not exist| )
+      ) TO result.
+      CONTINUE.
+    ENDIF.
+
+    TRY.
+        " Gọi AI để lấy mô tả
+        DATA(lt_descriptions) = zcl_ai_field_describer=>describe_table( lv_table ).
+
+        IF lt_descriptions IS INITIAL.
+          APPEND VALUE #(
+            %tky   = ls_key-%tky
+            %param = VALUE #( error_msg = 'AI returned empty response' )
+          ) TO result.
+          CONTINUE.
+        ENDIF.
+
+        " Serialize thành JSON trả về FE
+        DATA(lv_json) = /ui2/cl_json=>serialize(
+          data        = lt_descriptions
+          pretty_name = /ui2/cl_json=>pretty_mode-none
+        ).
+
+        APPEND VALUE #(
+          %tky   = ls_key-%tky
+          %param = VALUE #(
+            table_name  = ls_key-%param-table_name
+            result_json = lv_json
+          )
+        ) TO result.
+
+      CATCH cx_root INTO DATA(lx).
+        APPEND VALUE #(
+          %tky   = ls_key-%tky
+          %param = VALUE #( error_msg = lx->get_text( ) )
+        ) TO result.
+    ENDTRY.
+
+  ENDLOOP.
+
+ENDMETHOD.
 ENDCLASS.

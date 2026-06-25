@@ -1,3 +1,4 @@
+
 CLASS lhc_aprvlrequest DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
     METHODS get_instance_authorizations FOR INSTANCE AUTHORIZATION
@@ -58,7 +59,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
           CASE ls_req-actiontype.
 
-                      WHEN 'C'.
+            WHEN 'C'.
               zcl_json_helper=>deserialize(
                 EXPORTING iv_json   = ls_req-newdata
                 CHANGING  ca_record = lo_record
@@ -69,7 +70,6 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
                 ir_record     = lo_record
               ).
               INSERT (ls_req-tablename) FROM <ls_rec_c>.
-
 
             WHEN 'U'.
               zcl_json_helper=>deserialize(
@@ -83,6 +83,21 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
               UPDATE (ls_req-tablename) FROM <ls_rec_u>.
 
             WHEN 'D'.
+              DATA(lv_fk_error) = zcl_dynamic_table_reader=>check_foreign_key(
+                iv_table_name = ls_req-tablename
+                iv_record_key = CONV string( ls_req-recordkey )
+              ).
+              IF lv_fk_error IS NOT INITIAL.
+                APPEND VALUE #(
+                  %tky   = ls_req-%tky
+                  %param = VALUE #(
+                    success = abap_false
+                    message = lv_fk_error
+                  )
+                ) TO result.
+                CONTINUE.
+              ENDIF.
+
               zcl_json_helper=>deserialize(
                 EXPORTING iv_json   = CONV string( ls_req-recordkey )
                 CHANGING  ca_record = lo_record
@@ -96,7 +111,6 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
           ENDCASE.
 
           IF sy-subrc = 0.
-            " Delegate sang zcl_aprvl_util
             zcl_aprvl_util=>update_status(
               iv_aprvl_id = ls_req-aprvlid
               iv_status   = 'APPROVED'
@@ -170,7 +184,6 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         ELSE 'Rejected by admin'
       ).
 
-      " Delegate sang zcl_aprvl_util
       zcl_aprvl_util=>update_status(
         iv_aprvl_id = ls_req-aprvlid
         iv_status   = 'REJECTED'
