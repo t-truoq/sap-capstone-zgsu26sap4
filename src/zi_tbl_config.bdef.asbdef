@@ -39,6 +39,10 @@ etag master ActiveFlag
   action getRepositoryInfo                                  result [1] ZDT_REPO_INV_RES;
   action getFkValues         parameter ZTDE_FKVALUES_PARAM  result [1] ZTDE_FKVALUES_PARAM;
 action getAiDescription parameter ZTDE_AI_DESC_PARAM result [1] ZTDE_AI_DESC_PARAM;
+  action acquireLock        parameter ZDT_LOCK_REQ          result [1] ZDT_LOCK_RES;
+  action heartbeat          parameter ZDT_LOCK_REQ          result [1] ZDT_LOCK_RES;
+  action releaseLock        parameter ZDT_LOCK_REQ          result [1] ZDT_LOCK_RES;
+  action forceUnlock        parameter ZDT_LOCK_REQ          result [1] ZDT_LOCK_RES;
   association _FieldConfig { create; with draft; }
 
   mapping for ztbl_config corresponding

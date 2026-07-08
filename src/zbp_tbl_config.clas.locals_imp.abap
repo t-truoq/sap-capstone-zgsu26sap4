@@ -30,6 +30,14 @@ CLASS lhc_tblconfig DEFINITION INHERITING FROM cl_abap_behavior_handler.
  "── Repository Inventory action (NEW) ──
  METHODS getrepositoryinfo FOR MODIFY
  IMPORTING keys FOR ACTION tblconfig~getrepositoryinfo RESULT result.
+ METHODS acquirelock FOR MODIFY
+ IMPORTING keys FOR ACTION tblconfig~acquirelock RESULT result.
+ METHODS heartbeat FOR MODIFY
+ IMPORTING keys FOR ACTION tblconfig~heartbeat RESULT result.
+ METHODS releaselock FOR MODIFY
+ IMPORTING keys FOR ACTION tblconfig~releaselock RESULT result.
+ METHODS forceunlock FOR MODIFY
+ IMPORTING keys FOR ACTION tblconfig~forceunlock RESULT result.
 
  "── FldConfig handlers ──
  METHODS validatedisplayorder FOR VALIDATE ON SAVE
@@ -213,6 +221,18 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  LOOP AT lt_config INTO DATA(ls_config).
  IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
 
+ TRY.
+ zcl_auth_helper=>check_permission(
+ iv_table_name = CONV #( ls_config-tablename )
+ iv_action     = zcl_auth_helper=>c_action-create ).
+ CATCH zcx_04_no_auth INTO DATA(lx_auth_create).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = lx_auth_create->get_text( ) )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
+
  READ TABLE keys INTO DATA(ls_key)
  WITH KEY primary_key COMPONENTS %tky = ls_config-%tky.
  IF sy-subrc <> 0. CONTINUE. ENDIF.
@@ -270,12 +290,22 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDTRY.
 
- DATA(ls_aprvl) = zcl_approval_guard=>check_and_submit(
+ DATA ls_aprvl TYPE zcl_approval_guard=>ty_result.
+
+ TRY.
+ ls_aprvl = zcl_approval_guard=>check_and_submit(
  iv_table_name  = ls_config-tablename
  iv_action_type = 'C'
  iv_record_key  = CONV #( lv_create_key )
  iv_new_data    = lv_record_data
  ).
+ CATCH zcx_pending_exists INTO DATA(lx_pending_create).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = lx_pending_create->get_text( ) )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
 
  IF ls_aprvl-needs_approval = abap_true.
  APPEND VALUE #(
@@ -307,6 +337,22 @@ CLASS lhc_tblconfig IMPLEMENTATION.
 
  LOOP AT lt_config INTO DATA(ls_config).
  IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+
+ TRY.
+ zcl_auth_helper=>check_permission(
+ iv_table_name = CONV #( ls_config-tablename )
+ iv_action     = zcl_auth_helper=>c_action-update ).
+ CATCH zcx_04_no_auth INTO DATA(lx_auth_update).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = lx_auth_update->get_text( )
+ )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
 
  READ TABLE keys INTO DATA(ls_key)
  WITH KEY primary_key COMPONENTS %tky = ls_config-%tky.
@@ -363,13 +409,27 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ir_record = lo_new
  ).
 
- DATA(ls_aprvl) = zcl_approval_guard=>check_and_submit(
+ DATA ls_aprvl TYPE zcl_approval_guard=>ty_result.
+
+ TRY.
+ ls_aprvl = zcl_approval_guard=>check_and_submit(
  iv_table_name = ls_config-tablename
  iv_action_type = 'U'
  iv_record_key = CONV #( lv_record_key )
  iv_new_data = lv_record_data
  iv_old_data = lv_old_json
  ).
+ CATCH zcx_pending_exists INTO DATA(lx_pending_update).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = lx_pending_update->get_text( )
+ )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
 
  IF ls_aprvl-needs_approval = abap_true.
  APPEND VALUE #(
@@ -414,6 +474,22 @@ CLASS lhc_tblconfig IMPLEMENTATION.
 
  LOOP AT lt_config INTO DATA(ls_config).
  IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+
+ TRY.
+ zcl_auth_helper=>check_permission(
+ iv_table_name = CONV #( ls_config-tablename )
+ iv_action     = zcl_auth_helper=>c_action-delete ).
+ CATCH zcx_04_no_auth INTO DATA(lx_auth_delete).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = lx_auth_delete->get_text( )
+ )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
 
  READ TABLE keys INTO DATA(ls_key)
  WITH KEY primary_key COMPONENTS %tky = ls_config-%tky.
@@ -465,12 +541,26 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ELSE space
  ).
 
- DATA(ls_aprvl) = zcl_approval_guard=>check_and_submit(
+ DATA ls_aprvl TYPE zcl_approval_guard=>ty_result.
+
+ TRY.
+ ls_aprvl = zcl_approval_guard=>check_and_submit(
  iv_table_name = ls_config-tablename
  iv_action_type = 'D'
  iv_record_key = lv_record_key
  iv_old_data = lv_old_json
  ).
+ CATCH zcx_pending_exists INTO DATA(lx_pending_delete).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = lx_pending_delete->get_text( )
+ )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
 
  IF ls_aprvl-needs_approval = abap_true.
  APPEND VALUE #(
@@ -915,6 +1005,237 @@ ENDMETHOD.
  "───────────────────────────────────────────────────────────────────────
  " getrepositoryinfo — delegate sang zcl_repo_inventory
  "───────────────────────────────────────────────────────────────────────
+ METHOD acquirelock.
+ READ ENTITIES OF zi_tbl_config IN LOCAL MODE
+ ENTITY tblconfig
+ FIELDS ( tablename )
+ WITH CORRESPONDING #( keys )
+ RESULT DATA(lt_config).
+
+ LOOP AT lt_config INTO DATA(ls_config).
+ IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+
+ READ TABLE keys INTO DATA(ls_key)
+ WITH KEY primary_key COMPONENTS %tky = ls_config-%tky.
+ IF sy-subrc <> 0. CONTINUE. ENDIF.
+
+ DATA(ls_param) = ls_key-%param.
+ DATA(lv_scope) = COND ztde_lock_scope(
+ WHEN ls_param-lock_scope IS INITIAL THEN zcl_table_lock=>c_scope-table
+ ELSE ls_param-lock_scope ).
+ DATA(lv_reason) = COND ztde_lock_reason(
+ WHEN ls_param-lock_reason IS INITIAL THEN 'CRUD'
+ ELSE ls_param-lock_reason ).
+ DATA(lv_ttl) = COND i(
+ WHEN ls_param-ttl_seconds > 0 THEN ls_param-ttl_seconds
+ ELSE zcl_table_lock=>c_default_ttl_seconds ).
+ DATA(lv_session_id) = ls_param-session_id.
+
+ TRY.
+ IF lv_session_id IS INITIAL.
+ lv_session_id = cl_system_uuid=>create_uuid_c32_static( ).
+ ENDIF.
+
+ zcl_table_lock=>acquire_lock(
+ iv_table_name  = CONV #( ls_config-tablename )
+ iv_session_id  = lv_session_id
+ iv_reason      = lv_reason
+ iv_lock_scope  = lv_scope
+ iv_record_key  = CONV #( ls_param-record_key )
+ iv_ttl_seconds = lv_ttl ).
+
+ SELECT SINGLE locked_by, expires_at
+ FROM ztbl_lock
+ WHERE table_name = @ls_config-tablename
+ AND lock_scope = @lv_scope
+ AND record_key = @ls_param-record_key
+ AND session_id = @lv_session_id
+ INTO @DATA(ls_lock).
+
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ session_id = lv_session_id
+ success = abap_true
+ message = |Lock acquired|
+ locked_by = ls_lock-locked_by
+ expires_at = ls_lock-expires_at )
+ ) TO result.
+
+ CATCH zcx_table_locked INTO DATA(lx_lock).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ session_id = lv_session_id
+ success = abap_false
+ message = lx_lock->get_text( )
+ locked_by = lx_lock->mv_locked_by )
+ ) TO result.
+ CATCH cx_uuid_error INTO DATA(lx_uuid).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ session_id = lv_session_id
+ success = abap_false
+ message = lx_uuid->get_text( ) )
+ ) TO result.
+ ENDTRY.
+
+ ENDLOOP.
+ ENDMETHOD.
+
+ METHOD heartbeat.
+ READ ENTITIES OF zi_tbl_config IN LOCAL MODE
+ ENTITY tblconfig
+ FIELDS ( tablename )
+ WITH CORRESPONDING #( keys )
+ RESULT DATA(lt_config).
+
+ LOOP AT lt_config INTO DATA(ls_config).
+ IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+
+ READ TABLE keys INTO DATA(ls_key)
+ WITH KEY primary_key COMPONENTS %tky = ls_config-%tky.
+ IF sy-subrc <> 0. CONTINUE. ENDIF.
+
+ DATA(ls_param) = ls_key-%param.
+ DATA(lv_scope) = COND ztde_lock_scope(
+ WHEN ls_param-lock_scope IS INITIAL THEN zcl_table_lock=>c_scope-table
+ ELSE ls_param-lock_scope ).
+ DATA(lv_ttl) = COND i(
+ WHEN ls_param-ttl_seconds > 0 THEN ls_param-ttl_seconds
+ ELSE zcl_table_lock=>c_default_ttl_seconds ).
+
+ TRY.
+ zcl_table_lock=>heartbeat(
+ iv_table_name  = CONV #( ls_config-tablename )
+ iv_session_id  = ls_param-session_id
+ iv_lock_scope  = lv_scope
+ iv_record_key  = CONV #( ls_param-record_key )
+ iv_ttl_seconds = lv_ttl ).
+
+ SELECT SINGLE locked_by, expires_at
+ FROM ztbl_lock
+ WHERE table_name = @ls_config-tablename
+ AND lock_scope = @lv_scope
+ AND record_key = @ls_param-record_key
+ AND session_id = @ls_param-session_id
+ INTO @DATA(ls_lock).
+
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ session_id = ls_param-session_id
+ success = abap_true
+ message = |Lock heartbeat updated|
+ locked_by = ls_lock-locked_by
+ expires_at = ls_lock-expires_at )
+ ) TO result.
+
+ CATCH zcx_table_locked INTO DATA(lx_lock).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ session_id = ls_param-session_id
+ success = abap_false
+ message = lx_lock->get_text( )
+ locked_by = lx_lock->mv_locked_by )
+ ) TO result.
+ ENDTRY.
+
+ ENDLOOP.
+ ENDMETHOD.
+
+ METHOD releaselock.
+ READ ENTITIES OF zi_tbl_config IN LOCAL MODE
+ ENTITY tblconfig
+ FIELDS ( tablename )
+ WITH CORRESPONDING #( keys )
+ RESULT DATA(lt_config).
+
+ LOOP AT lt_config INTO DATA(ls_config).
+ IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+
+ READ TABLE keys INTO DATA(ls_key)
+ WITH KEY primary_key COMPONENTS %tky = ls_config-%tky.
+ IF sy-subrc <> 0. CONTINUE. ENDIF.
+
+ DATA(ls_param) = ls_key-%param.
+ DATA(lv_scope) = COND ztde_lock_scope(
+ WHEN ls_param-lock_scope IS INITIAL THEN zcl_table_lock=>c_scope-table
+ ELSE ls_param-lock_scope ).
+
+ TRY.
+ zcl_table_lock=>release_lock(
+ iv_table_name = CONV #( ls_config-tablename )
+ iv_session_id = ls_param-session_id
+ iv_lock_scope = lv_scope
+ iv_record_key = CONV #( ls_param-record_key ) ).
+
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ session_id = ls_param-session_id
+ success = abap_true
+ message = |Lock released| )
+ ) TO result.
+
+ CATCH zcx_table_locked INTO DATA(lx_lock).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ session_id = ls_param-session_id
+ success = abap_false
+ message = lx_lock->get_text( )
+ locked_by = lx_lock->mv_locked_by )
+ ) TO result.
+ ENDTRY.
+
+ ENDLOOP.
+ ENDMETHOD.
+
+ METHOD forceunlock.
+ READ ENTITIES OF zi_tbl_config IN LOCAL MODE
+ ENTITY tblconfig
+ FIELDS ( tablename )
+ WITH CORRESPONDING #( keys )
+ RESULT DATA(lt_config).
+
+ LOOP AT lt_config INTO DATA(ls_config).
+ IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+
+ TRY.
+ zcl_table_lock=>force_release(
+ iv_table_name = CONV #( ls_config-tablename ) ).
+
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_true
+ message = |Locks force released| )
+ ) TO result.
+
+ CATCH zcx_04_no_auth INTO DATA(lx_auth).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = lx_auth->get_text( ) )
+ ) TO result.
+ ENDTRY.
+
+ ENDLOOP.
+ ENDMETHOD.
+
  METHOD getrepositoryinfo.
  READ ENTITIES OF zi_tbl_config IN LOCAL MODE
  ENTITY tblconfig

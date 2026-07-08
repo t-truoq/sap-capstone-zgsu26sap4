@@ -1,0 +1,23 @@
+managed implementation in class zbp_i_auth_user unique;
+strict ( 2 );
+
+define behavior for ZI_AUTH_USER alias AuthUser
+persistent table ztbl_user_master
+lock master
+authorization master ( global )
+{
+  create;
+  update;
+  delete;
+
+  field ( readonly : update ) Username;
+
+  determination syncRolePermissions on save { create; update; }
+
+  mapping for ztbl_user_master
+  {
+    Username   = username;
+    RoleType   = role_type;
+    ActiveFlag = active_flag;
+  }
+}

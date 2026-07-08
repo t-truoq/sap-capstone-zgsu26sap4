@@ -3,6 +3,7 @@ CLASS zcl_aprvl_util DEFINITION
 
   PUBLIC SECTION.
     TYPES tt_aprvl_history TYPE STANDARD TABLE OF ztbl_aprvl WITH DEFAULT KEY.
+
     TYPES:
       BEGIN OF ty_submit_result,
         success  TYPE abap_bool,
@@ -21,25 +22,42 @@ CLASS zcl_aprvl_util DEFINITION
         VALUE(rs_result) TYPE ty_submit_result.
 
     CLASS-METHODS get_approval_history
-      IMPORTING iv_table_name    TYPE ztde_table_name
-                iv_record_key    TYPE ztde_record_key
+      IMPORTING iv_table_name     TYPE ztde_table_name
+                iv_record_key     TYPE ztde_record_key
       RETURNING VALUE(rt_history) TYPE tt_aprvl_history.
 
     CLASS-METHODS get_pending_approvals
-      IMPORTING iv_table_name    TYPE ztde_table_name OPTIONAL
-      RETURNING VALUE(rt_result)  TYPE tt_aprvl_history.
+      IMPORTING iv_table_name   TYPE ztde_table_name OPTIONAL
+      RETURNING VALUE(rt_result) TYPE tt_aprvl_history.
 
     CLASS-METHODS is_approval_required
-      IMPORTING iv_table_name    TYPE ztde_table_name
-      RETURNING VALUE(rv_result)  TYPE abap_bool.
-CLASS-METHODS update_status
+      IMPORTING iv_table_name   TYPE ztde_table_name
+      RETURNING VALUE(rv_result) TYPE abap_bool.
+
+    CLASS-METHODS update_status
       IMPORTING
         iv_aprvl_id TYPE sysuuid_c32
         iv_status   TYPE ztde_aprvl_status
         iv_remarks  TYPE string OPTIONAL.
 
+    CLASS-METHODS find_pending_by_record
+      IMPORTING iv_table_name     TYPE ztde_table_name
+                iv_record_key     TYPE ztde_record_key
+      RETURNING VALUE(rs_pending) TYPE ztbl_aprvl.
+
+    CLASS-METHODS assert_no_conflicting_pending
+      IMPORTING iv_table_name TYPE ztde_table_name
+                iv_record_key TYPE ztde_record_key
+      RAISING   zcx_pending_exists.
+
+    CLASS-METHODS update_pending_data
+      IMPORTING iv_aprvl_id    TYPE sysuuid_c32
+                iv_action_type TYPE ztde_action_type
+                iv_new_data    TYPE string OPTIONAL
+                iv_old_data    TYPE string OPTIONAL.
 
 ENDCLASS.
+
 
 CLASS zcl_aprvl_util IMPLEMENTATION.
 
@@ -75,6 +93,7 @@ CLASS zcl_aprvl_util IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
+
   METHOD get_approval_history.
     SELECT * FROM ztbl_aprvl
       WHERE table_name = @iv_table_name
@@ -82,6 +101,7 @@ CLASS zcl_aprvl_util IMPLEMENTATION.
       ORDER BY submitted_at DESCENDING
       INTO TABLE @rt_history.
   ENDMETHOD.
+
 
   METHOD get_pending_approvals.
     IF iv_table_name IS NOT INITIAL.
@@ -98,22 +118,66 @@ CLASS zcl_aprvl_util IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+
   METHOD is_approval_required.
     SELECT SINGLE approval_required FROM ztbl_config
       WHERE table_name = @iv_table_name
       INTO @DATA(lv_flag).
+
     rv_result = COND #( WHEN lv_flag = 'X' THEN abap_true ELSE abap_false ).
   ENDMETHOD.
-METHOD update_status.
 
-  DATA(lv_now) = utclong_current( ).
 
-  UPDATE ztbl_aprvl
-    SET status        = @iv_status,
-        approved_by   = @sy-uname,
-        approved_at   = @lv_now,
-        aprvl_comment = @iv_remarks
-    WHERE aprvl_id    = @iv_aprvl_id.
+  METHOD update_status.
+    DATA(lv_now) = utclong_current( ).
 
-ENDMETHOD.
+    UPDATE ztbl_aprvl
+      SET status        = @iv_status,
+          approved_by   = @sy-uname,
+          approved_at   = @lv_now,
+          aprvl_comment = @iv_remarks
+      WHERE aprvl_id    = @iv_aprvl_id.
+  ENDMETHOD.
+
+
+  METHOD find_pending_by_record.
+    SELECT * FROM ztbl_aprvl
+      WHERE table_name = @iv_table_name
+        AND record_key = @iv_record_key
+        AND status     = 'PENDING'
+      ORDER BY submitted_at DESCENDING
+      INTO @rs_pending
+      UP TO 1 ROWS.
+      EXIT.
+    ENDSELECT.
+  ENDMETHOD.
+
+
+  METHOD assert_no_conflicting_pending.
+    DATA(ls_pending) = find_pending_by_record(
+      iv_table_name = iv_table_name
+      iv_record_key = iv_record_key ).
+
+    IF ls_pending-aprvl_id IS NOT INITIAL
+       AND ls_pending-submitted_by <> sy-uname.
+      RAISE EXCEPTION TYPE zcx_pending_exists
+        EXPORTING
+          iv_text         = |Record đang chờ duyệt bởi { ls_pending-submitted_by }. Không thể tạo request mới.|
+          iv_submitted_by = ls_pending-submitted_by.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD update_pending_data.
+    DATA(lv_now) = utclong_current( ).
+
+    UPDATE ztbl_aprvl
+      SET action_type  = @iv_action_type,
+          new_data     = @iv_new_data,
+          old_data     = @iv_old_data,
+          submitted_at = @lv_now
+      WHERE aprvl_id = @iv_aprvl_id.
+  ENDMETHOD.
+
 ENDCLASS.
+

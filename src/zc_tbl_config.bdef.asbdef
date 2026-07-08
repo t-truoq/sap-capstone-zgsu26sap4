@@ -20,8 +20,13 @@ define behavior for ZC_TBL_CONFIG alias TblConfig
  use action deleteRecord;
  use action getDomainValues;
  use action getFieldMeta;
-
+ use action getFkValues;
  use action getRepositoryInfo;
+ use action getAiDescription;
+ use action acquireLock;
+ use action heartbeat;
+ use action releaseLock;
+ use action forceUnlock;
 
  use association _FieldConfig { create; with draft; }
 }

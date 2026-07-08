@@ -1,0 +1,7 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "ZI_AUTH_USER_PERM"
+    ]
+  }
+}

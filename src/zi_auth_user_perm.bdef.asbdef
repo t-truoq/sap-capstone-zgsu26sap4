@@ -1,0 +1,25 @@
+managed implementation in class zbp_i_auth_user_perm unique;
+strict ( 2 );
+
+define behavior for ZI_AUTH_USER_PERM alias AuthUserPerm
+persistent table ztbl_user_perm
+lock master
+authorization master ( global )
+{
+  create;
+  update;
+  delete;
+
+  field ( readonly : update ) Username, TableName;
+
+  mapping for ztbl_user_perm
+  {
+    Username  = username;
+    TableName = table_name;
+    CanView   = can_view;
+    CanCreate = can_create;
+    CanUpdate = can_update;
+    CanDelete = can_delete;
+    CanUpload = can_upload;
+  }
+}
