@@ -23,6 +23,8 @@ CLASS zcl_excel_importer DEFINITION
 
   PRIVATE SECTION.
 
+    CONSTANTS c_source_table_prefix TYPE string VALUE '__SOURCE_TABLE='.
+
     TYPES: BEGIN OF ty_colmap,
              column    TYPE i,
              fieldname TYPE fieldname,
@@ -43,6 +45,12 @@ CLASS zcl_excel_importer DEFINITION
                 et_messages    TYPE string_table.
 
     "! Chuẩn hóa text để so khớp header (uppercase, bỏ space thừa).
+    CLASS-METHODS validate_source_table_marker
+      IMPORTING io_worksheet  TYPE REF TO zcl_excel_worksheet
+                iv_max_col    TYPE i
+                iv_table_name TYPE tabname
+      RAISING   zcx_excel_pipeline.
+
     CLASS-METHODS normalize
       IMPORTING iv_text        TYPE clike
       RETURNING VALUE(rv_norm) TYPE string.
@@ -62,15 +70,20 @@ CLASS zcl_excel_importer IMPLEMENTATION.
         lo_excel = lo_reader->load( iv_file ).
       CATCH zcx_excel INTO DATA(lx_read).
         RAISE EXCEPTION TYPE zcx_excel_pipeline
-          EXPORTING iv_text = |Không đọc được file Excel: { lx_read->get_text( ) }|.
+          EXPORTING iv_text = |Cannot read Excel file: { lx_read->get_text( ) }|.
     ENDTRY.
 
     DATA(lo_ws)      = lo_excel->get_active_worksheet( ).
     DATA(lv_max_col) = CONV i( lo_ws->get_highest_column( ) ).
     DATA(lv_max_row) = CONV i( lo_ws->get_highest_row( ) ).
 
+    validate_source_table_marker(
+      io_worksheet  = lo_ws
+      iv_max_col    = lv_max_col
+      iv_table_name = iv_table_name ).
+
     IF lv_max_col = 0 OR lv_max_row < 2.
-      APPEND |File không có dòng dữ liệu (header row 1, data từ row 2).| TO et_messages.
+      APPEND |Excel file has no data rows. Row 1 must be header; data starts from row 2.| TO et_messages.
       RETURN.
     ENDIF.
 
@@ -78,7 +91,7 @@ CLASS zcl_excel_importer IMPLEMENTATION.
     DATA(lt_fields) = zcl_table_inspector=>get_field_list( iv_table_name ).
     IF lt_fields IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |Table { iv_table_name } chưa được config trong ZFLD_CONFIG|.
+        EXPORTING iv_text = |Table { iv_table_name } is not configured in ZFLD_CONFIG. Configure fields before Excel import.|.
     ENDIF.
 
     " ---- 3. Map cột Excel → fieldname ----
@@ -96,7 +109,30 @@ CLASS zcl_excel_importer IMPLEMENTATION.
 
     IF lt_colmap IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = 'Header Excel không khớp field nào của bảng'.
+        EXPORTING iv_text = |Uploaded Excel file does not match table { iv_table_name }. | &&
+                            |No header column matches this table. | &&
+                            |Select the correct table or download the template/data from { iv_table_name } and upload again.|.
+    ENDIF.
+
+    DATA(lt_required_keys) = zcl_excel_types=>get_match_key_fields(
+      it_fields     = lt_fields
+      iv_table_name = iv_table_name ).
+    DATA lt_missing_keys TYPE string_table.
+
+    LOOP AT lt_required_keys INTO DATA(lv_required_key).
+      READ TABLE lt_colmap TRANSPORTING NO FIELDS
+        WITH KEY fieldname = CONV fieldname( lv_required_key ).
+      IF sy-subrc <> 0.
+        APPEND lv_required_key TO lt_missing_keys.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_missing_keys IS NOT INITIAL.
+      DATA(lv_missing_keys) = concat_lines_of( table = lt_missing_keys sep = ', ' ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Uploaded Excel file does not match table { iv_table_name }. | &&
+                            |Missing required key column(s): { lv_missing_keys }. | &&
+                            |Select the correct table or download the template/data from { iv_table_name } and upload again.|.
     ENDIF.
 
     " ---- 4. Đọc data row 2..max_row (quét mọi cột để phát hiện dữ liệu ngoài vùng) ----
@@ -145,9 +181,9 @@ CLASS zcl_excel_importer IMPLEMENTATION.
             READ TABLE lt_header_cols TRANSPORTING NO FIELDS
               WITH KEY table_line = lv_col.
             IF sy-subrc = 0.
-              APPEND |Bỏ qua ô { lv_col_alpha }{ lv_row }: cột này có header nhưng không map được field.| TO et_messages.
+              APPEND |Ignored cell { lv_col_alpha }{ lv_row }: its header does not belong to table { iv_table_name }.| TO et_messages.
             ELSE.
-              APPEND |Bỏ qua ô { lv_col_alpha }{ lv_row }: dữ liệu nằm ngoài vùng cột header.| TO et_messages.
+              APPEND |Ignored cell { lv_col_alpha }{ lv_row }: data is outside the Excel header area.| TO et_messages.
             ENDIF.
           ENDIF.
         ENDIF.
@@ -163,7 +199,47 @@ CLASS zcl_excel_importer IMPLEMENTATION.
       lv_row = lv_row + 1.
     ENDWHILE.
 
-    APPEND |Đã parse { lines( et_rows ) } dòng dữ liệu.| TO et_messages.
+    APPEND |Parsed { lines( et_rows ) } data rows.| TO et_messages.
+  ENDMETHOD.
+
+
+  METHOD validate_source_table_marker.
+    DATA lv_alpha TYPE zexcel_cell_column_alpha.
+    DATA lv_value TYPE zexcel_cell_value.
+    DATA lv_header TYPE string.
+    DATA lv_col TYPE i.
+    DATA(lv_prefix_len) = strlen( c_source_table_prefix ).
+
+    lv_col = 1.
+    WHILE lv_col <= iv_max_col.
+      lv_alpha = zcl_excel_common=>convert_column2alpha( lv_col ).
+      CLEAR lv_value.
+      TRY.
+          io_worksheet->get_cell(
+            EXPORTING ip_column = lv_alpha
+                      ip_row    = 1
+            IMPORTING ep_value  = lv_value ).
+        CATCH zcx_excel.
+          CLEAR lv_value.
+      ENDTRY.
+
+      lv_header = normalize( lv_value ).
+      IF strlen( lv_header ) >= lv_prefix_len
+         AND lv_header(lv_prefix_len) = c_source_table_prefix.
+        DATA(lv_source_table) = lv_header+lv_prefix_len.
+        DATA(lv_current_table) = normalize( iv_table_name ).
+
+        IF lv_source_table IS NOT INITIAL AND lv_source_table <> lv_current_table.
+          RAISE EXCEPTION TYPE zcx_excel_pipeline
+            EXPORTING iv_text = |You are importing a { lv_source_table } Excel file into { lv_current_table }. | &&
+                                |Switch to { lv_source_table }, or download the template/data from { lv_current_table } and upload that file.|.
+        ENDIF.
+
+        RETURN.
+      ENDIF.
+
+      lv_col = lv_col + 1.
+    ENDWHILE.
   ENDMETHOD.
 
 
@@ -190,6 +266,12 @@ CLASS zcl_excel_importer IMPLEMENTATION.
       DATA(lv_header_norm) = normalize( lv_value ).
 
       IF lv_header_norm IS NOT INITIAL.
+        DATA(lv_prefix_len) = strlen( c_source_table_prefix ).
+        IF strlen( lv_header_norm ) >= lv_prefix_len
+           AND lv_header_norm(lv_prefix_len) = c_source_table_prefix.
+          lv_col = lv_col + 1.
+          CONTINUE.
+        ENDIF.
         APPEND lv_col TO et_header_cols.   " cột này có header
 
         DATA lv_found TYPE abap_bool.
@@ -215,19 +297,19 @@ CLASS zcl_excel_importer IMPLEMENTATION.
         ENDIF.
 
         IF lv_found = abap_false.
-          APPEND |Cột '{ lv_value }' không khớp field nào → bỏ qua.| TO et_messages.
+          APPEND |Column '{ lv_value }' does not belong to table { iv_table_name } and was ignored.| TO et_messages.
         ELSE.
           READ TABLE it_fields INTO DATA(ls_matched) WITH KEY field_name = lv_match.
           IF sy-subrc = 0 AND zcl_excel_types=>is_parseable_column(
             is_field      = ls_matched
             iv_table_name = iv_table_name
             it_fields     = it_fields ) = abap_false.
-            APPEND |Cột '{ lv_value }' ({ lv_match }) bị bỏ qua (readonly/hidden/hệ thống).| TO et_messages.
+            APPEND |Column '{ lv_value }' ({ lv_match }) is readonly/hidden/system-managed and was ignored.| TO et_messages.
           ELSE.
             " Label trùng → cùng map về 1 field. Chỉ nhận cột đầu, cột sau cảnh báo.
             READ TABLE et_colmap TRANSPORTING NO FIELDS WITH KEY fieldname = lv_match.
             IF sy-subrc = 0.
-              APPEND |Cột '{ lv_value }' map trùng field { lv_match } → bỏ qua cột lặp.| TO et_messages.
+              APPEND |Column '{ lv_value }' maps to field { lv_match } more than once; duplicate column was ignored.| TO et_messages.
             ELSE.
               APPEND VALUE #( column    = lv_col
                               fieldname = lv_match ) TO et_colmap.

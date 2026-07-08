@@ -29,6 +29,8 @@ CLASS zcl_excel_exporter DEFINITION
 
   PRIVATE SECTION.
 
+    CONSTANTS c_source_table_prefix TYPE string VALUE '__SOURCE_TABLE='.
+
     CLASS-METHODS validate_table_name
       IMPORTING iv_table_name TYPE tabname
       RAISING   zcx_excel_pipeline.
@@ -266,6 +268,12 @@ CLASS zcl_excel_exporter IMPLEMENTATION.
             ip_row    = 1
             ip_value  = lv_header ).
         ENDLOOP.
+
+        lv_col_alpha = zcl_excel_common=>convert_column2alpha( lines( lt_export_cols ) + 1 ).
+        lo_worksheet->set_cell(
+          ip_column = lv_col_alpha
+          ip_row    = 1
+          ip_value  = |{ c_source_table_prefix }{ iv_table_name }| ).
 
         " ---- Data rows (từ row 2) ----
         FIELD-SYMBOLS <lt_tab> TYPE STANDARD TABLE.

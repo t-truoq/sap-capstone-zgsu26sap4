@@ -1,0 +1,5 @@
+@EndUserText.label: 'Auth Admin API'
+define service ZSD_AUTH_ADMIN {
+  expose ZC_AUTH_USER as AuthUsers;
+  expose ZC_AUTH_USER_PERM as UserPermissions;
+}

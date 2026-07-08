@@ -29,6 +29,13 @@ CLASS zcl_excel_diff_builder DEFINITION
                 it_cells      TYPE zcl_excel_types=>tt_cell
       RETURNING VALUE(rv_key) TYPE string.
 
+    CLASS-METHODS get_key_problem
+      IMPORTING iv_table_name      TYPE tabname
+                iv_entity_id_field TYPE fieldname
+                it_biz_keys        TYPE string_table
+                it_cells           TYPE zcl_excel_types=>tt_cell
+      RETURNING VALUE(rv_message)  TYPE string.
+
     CLASS-METHODS append_new_diff
       IMPORTING iv_row_no     TYPE i
                 iv_table_name TYPE tabname
@@ -61,18 +68,19 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
     DATA(lt_fields) = zcl_table_inspector=>get_field_list( iv_table_name ).
     IF lt_fields IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |Table { iv_table_name } chưa được config trong ZFLD_CONFIG|.
+        EXPORTING iv_text = |Table { iv_table_name } is not configured in ZFLD_CONFIG. Configure fields before Excel import.|.
     ENDIF.
 
     DATA lt_biz_keys TYPE string_table.
     lt_biz_keys = zcl_excel_types=>get_match_key_fields(
                     it_fields     = lt_fields
                     iv_table_name = iv_table_name ).
+    DATA(lv_eid_f) = zcl_excel_types=>get_entity_id_field( iv_table_name ).
 
     IF lt_biz_keys IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |Table { iv_table_name } không có key field importable để so sánh. | &&
-                                |Set is_key_field=X cho business key trong ZFLD_CONFIG.|.
+        EXPORTING iv_text = |Table { iv_table_name } has no importable key field for Excel diff. | &&
+                            |Set IS_KEY_FIELD = X for the business key in ZFLD_CONFIG.|.
     ENDIF.
 
     " Đếm key trùng trong file (ENTITY_ID hoặc business key)
@@ -87,6 +95,15 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
         iv_table_name = iv_table_name
         it_fields     = lt_fields
         it_cells      = ls_pre-cells ).
+
+      IF get_key_problem(
+           iv_table_name      = iv_table_name
+           iv_entity_id_field = lv_eid_f
+           it_biz_keys        = lt_biz_keys
+           it_cells           = ls_pre-cells ) IS NOT INITIAL.
+        CONTINUE.
+      ENDIF.
+
       READ TABLE lt_kc ASSIGNING FIELD-SYMBOL(<kc>) WITH KEY rkey = lv_prekey.
       IF sy-subrc = 0.
         <kc>-cnt = <kc>-cnt + 1.
@@ -95,8 +112,6 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    DATA(lv_eid_f) = zcl_excel_types=>get_entity_id_field( iv_table_name ).
-
     LOOP AT it_rows INTO DATA(ls_row).
 
       DATA(lv_fkey) = build_file_key(
@@ -104,13 +119,28 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
         it_fields     = lt_fields
         it_cells      = ls_row-cells ).
 
+      DATA(lv_key_problem) = get_key_problem(
+        iv_table_name      = iv_table_name
+        iv_entity_id_field = lv_eid_f
+        it_biz_keys        = lt_biz_keys
+        it_cells           = ls_row-cells ).
+
+      IF lv_key_problem IS NOT INITIAL.
+        APPEND VALUE #( row_no     = ls_row-row_no
+                        table_name = iv_table_name
+                        record_key = lv_fkey
+                        status     = zcl_excel_types=>c_status-error
+                        message    = lv_key_problem ) TO rt_diff.
+        CONTINUE.
+      ENDIF.
+
       READ TABLE lt_kc INTO DATA(ls_kc) WITH KEY rkey = lv_fkey.
       IF sy-subrc = 0 AND ls_kc-cnt > 1.
         APPEND VALUE #( row_no     = ls_row-row_no
                         table_name = iv_table_name
                         record_key = lv_fkey
                         status     = zcl_excel_types=>c_status-error
-                        message    = |Key bị trùng trong file ({ ls_kc-cnt } dòng cùng key) - sửa file trước khi import| ) TO rt_diff.
+                        message    = |Duplicate key in uploaded file ({ ls_kc-cnt } rows with the same key). Fix duplicate key { lv_fkey } before import.| ) TO rt_diff.
         CONTINUE.
       ENDIF.
 
@@ -149,7 +179,7 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = zcl_excel_types=>c_status-error
-                          message    = 'Thiếu giá trị key field' ) TO rt_diff.
+                          message    = |Missing key value for table { iv_table_name }. Fill all key columns before import.| ) TO rt_diff.
           CONTINUE.
         ENDIF.
       ENDIF.
@@ -164,7 +194,7 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
                         table_name = iv_table_name
                         record_key = lv_fkey
                         status     = zcl_excel_types=>c_status-error
-                        message    = 'Không build được điều kiện tìm bản ghi DB' ) TO rt_diff.
+                        message    = |Cannot identify target record for table { iv_table_name }. Check key columns in the uploaded file.| ) TO rt_diff.
         CONTINUE.
       ENDIF.
 
@@ -183,7 +213,7 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = zcl_excel_types=>c_status-error
-                          message    = |Đọc DB lỗi: { lx->get_text( ) }| ) TO rt_diff.
+                          message    = |Database read failed for { iv_table_name }: { lx->get_text( ) }| ) TO rt_diff.
           CONTINUE.
       ENDTRY.
 
@@ -193,7 +223,8 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = zcl_excel_types=>c_status-error
-                          message    = |ENTITY_ID không tồn tại trong DB - kiểm tra file export| ) TO rt_diff.
+                          message    = |ENTITY_ID from uploaded file does not exist in { iv_table_name }. | &&
+                                       |Download data/template from the current table and upload again.| ) TO rt_diff.
         ELSE.
           append_new_diff(
             EXPORTING iv_row_no     = ls_row-row_no
@@ -240,7 +271,7 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
                         table_name = iv_table_name
                         record_key = lv_rkey
                         status     = zcl_excel_types=>c_status-unchanged
-                        message    = 'Không thay đổi' ) TO rt_diff.
+                        message    = 'No changes detected' ) TO rt_diff.
       ENDIF.
 
     ENDLOOP.
@@ -252,6 +283,51 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
       iv_table_name = iv_table_name
       it_fields     = it_fields
       it_cells      = it_cells ).
+  ENDMETHOD.
+
+
+  METHOD get_key_problem.
+    IF iv_entity_id_field IS NOT INITIAL.
+      DATA(lv_eid) = zcl_excel_types=>get_cell_value(
+        it_cells = it_cells
+        iv_field = iv_entity_id_field ).
+      IF lv_eid IS NOT INITIAL.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
+    DATA lt_missing_columns TYPE string_table.
+    DATA lt_empty_values TYPE string_table.
+
+    LOOP AT it_biz_keys INTO DATA(lv_key).
+      READ TABLE it_cells TRANSPORTING NO FIELDS
+        WITH KEY fieldname = CONV fieldname( lv_key ).
+
+      IF sy-subrc <> 0.
+        APPEND lv_key TO lt_missing_columns.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_value) = zcl_excel_types=>get_cell_value(
+        it_cells = it_cells
+        iv_field = CONV #( lv_key ) ).
+      IF lv_value IS INITIAL.
+        APPEND lv_key TO lt_empty_values.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_missing_columns IS NOT INITIAL.
+      DATA(lv_missing) = concat_lines_of( table = lt_missing_columns sep = ', ' ).
+      rv_message = |Uploaded file does not match the selected table { iv_table_name }. | &&
+                   |Missing key column(s): { lv_missing }. | &&
+                   |Select the correct table or download the template/data from { iv_table_name } and upload again.|.
+      RETURN.
+    ENDIF.
+
+    IF lt_empty_values IS NOT INITIAL.
+      DATA(lv_empty) = concat_lines_of( table = lt_empty_values sep = ', ' ).
+      rv_message = |Missing key value(s) for { lv_empty }. Fill the key column(s) before import.|.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -340,7 +416,7 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
 
       IF ( ls_field-mandatory_flag = abap_true OR ls_field-mandatory_flag = 'X' )
          AND lv_val IS INITIAL.
-        APPEND |Field { ls_field-field_name } bắt buộc nhập| TO rt_errors.
+        APPEND |Field { ls_field-field_name } is required.| TO rt_errors.
         CONTINUE.
       ENDIF.
 
@@ -349,7 +425,7 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
       ENDIF.
 
       IF ls_field-inttype = 'C' AND ls_field-leng > 0 AND strlen( lv_val ) > ls_field-leng.
-        APPEND |Field { ls_field-field_name } vượt độ dài { ls_field-leng }| TO rt_errors.
+        APPEND |Field { ls_field-field_name } exceeds max length { ls_field-leng }.| TO rt_errors.
       ENDIF.
 
       IF ls_field-domain_name IS NOT INITIAL.
@@ -357,7 +433,7 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
         IF lt_vals IS NOT INITIAL.
           READ TABLE lt_vals TRANSPORTING NO FIELDS WITH KEY value = lv_val.
           IF sy-subrc <> 0.
-            APPEND |Field { ls_field-field_name } giá trị '{ lv_val }' không hợp lệ (domain { ls_field-domain_name })| TO rt_errors.
+            APPEND |Field { ls_field-field_name } value '{ lv_val }' is not allowed by domain { ls_field-domain_name }.| TO rt_errors.
           ENDIF.
         ENDIF.
       ENDIF.

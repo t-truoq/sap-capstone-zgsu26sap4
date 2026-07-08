@@ -3,9 +3,9 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZCL_AUTH_HELPER</CLSNAME>
+    <CLSNAME>ZCL_TABLE_LOCK</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>Authorization helper (ADMIN/USER + per-table permission)</DESCRIPT>
+    <DESCRIPT>Application-level table lock (TTL + heartbeat)</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
