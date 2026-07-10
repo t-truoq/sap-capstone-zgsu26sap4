@@ -1,13 +1,13 @@
 {
   "BASEINFO": {
     "FROM": [
-      "ZI_APRVL_REQUEST"
+      "ZI_APRVL_ITEM"
     ],
     "ASSOCIATED": [
-      "ZC_APRVL_ITEM"
+      "ZC_APRVL_REQUEST"
     ],
     "BASE": [
-      "ZI_APRVL_REQUEST"
+      "ZI_APRVL_ITEM"
     ]
   }
 }

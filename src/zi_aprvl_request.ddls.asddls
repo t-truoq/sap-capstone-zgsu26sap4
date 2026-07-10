@@ -1,10 +1,10 @@
-
 @AbapCatalog.viewEnhancementCategory: [#NONE]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Interface View for Aprvl'
 @Metadata.ignorePropagatedAnnotations: true
 define root view entity ZI_APRVL_REQUEST
   as select from ztbl_aprvl
+  composition [0..*] of ZI_APRVL_ITEM as _Items
 {
   key aprvl_id      as AprvlId,
       table_name    as TableName,
@@ -17,5 +17,7 @@ define root view entity ZI_APRVL_REQUEST
       submitted_at  as SubmittedAt,
       approved_by   as ApprovedBy,
       approved_at   as ApprovedAt,
-      aprvl_comment as AprvlComment
+      aprvl_comment as AprvlComment,
+
+      _Items
 }

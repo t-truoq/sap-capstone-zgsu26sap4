@@ -19,6 +19,13 @@ define root view entity ZC_APRVL_REQUEST
       type:     #IDENTIFICATION_REFERENCE,
       label:    'Request Detail',
       position: 10
+    },
+    {
+      id:            'Items',
+      type:          #LINEITEM_REFERENCE,
+      label:         'Excel Approval Items',
+      position:      20,
+      targetElement: '_Items'
     }
   ]
 
@@ -64,7 +71,6 @@ define root view entity ZC_APRVL_REQUEST
   @UI.identification: [{ position: 30, label: 'Old Data (JSON)' }]
       OldData,
 
-  -- Nút Approve + Reject trên detail page
   @UI.identification: [
     { type: #FOR_ACTION, dataAction: 'approve', label: 'Approve',
       position: 70, emphasized: true },
@@ -77,5 +83,7 @@ define root view entity ZC_APRVL_REQUEST
       ApprovedAt,
 
   @UI.identification: [{ position: 60, label: 'Comment' }]
-      AprvlComment
+      AprvlComment,
+
+      _Items : redirected to composition child ZC_APRVL_ITEM
 }

@@ -33,9 +33,17 @@ CLASS zcl_auth_helper DEFINITION
       IMPORTING iv_username        TYPE syuname DEFAULT sy-uname
       RETURNING VALUE(rv_is_admin) TYPE abap_bool.
 
+    CLASS-METHODS is_active_user
+      IMPORTING iv_username          TYPE syuname DEFAULT sy-uname
+      RETURNING VALUE(rv_is_active)  TYPE abap_bool.
+
     CLASS-METHODS get_user_permissions
       IMPORTING iv_username   TYPE syuname DEFAULT sy-uname
                 iv_table_name TYPE ztde_table_name
+      RETURNING VALUE(rs_perm) TYPE ztde_user_permission.
+
+    CLASS-METHODS get_table_permissions
+      IMPORTING iv_table_name TYPE ztde_table_name
       RETURNING VALUE(rs_perm) TYPE ztde_user_permission.
 
     CLASS-METHODS check_permission
@@ -71,15 +79,56 @@ CLASS zcl_auth_helper IMPLEMENTATION.
       INTO @rv_is_admin.
   ENDMETHOD.
 
+  METHOD is_active_user.
+    SELECT SINGLE @abap_true
+      FROM ztbl_user_master
+      WHERE username    = @iv_username
+        AND active_flag = 'X'
+      INTO @rv_is_active.
+  ENDMETHOD.
+
   METHOD get_user_permissions.
+    IF is_active_user( iv_username ) = abap_false.
+      RETURN.
+    ENDIF.
+
     SELECT SINGLE can_view, can_create, can_update, can_delete, can_upload
       FROM ztbl_user_perm
       WHERE username   = @iv_username
         AND table_name = @iv_table_name
       INTO CORRESPONDING FIELDS OF @rs_perm.
+
+    DATA(ls_table_perm) = get_table_permissions(
+      iv_table_name = iv_table_name ).
+
+    rs_perm-can_view   = COND #( WHEN rs_perm-can_view   = abap_true AND ls_table_perm-can_view   = abap_true THEN abap_true ELSE abap_false ).
+    rs_perm-can_create = COND #( WHEN rs_perm-can_create = abap_true AND ls_table_perm-can_create = abap_true THEN abap_true ELSE abap_false ).
+    rs_perm-can_update = COND #( WHEN rs_perm-can_update = abap_true AND ls_table_perm-can_update = abap_true THEN abap_true ELSE abap_false ).
+    rs_perm-can_delete = COND #( WHEN rs_perm-can_delete = abap_true AND ls_table_perm-can_delete = abap_true THEN abap_true ELSE abap_false ).
+    rs_perm-can_upload = COND #( WHEN rs_perm-can_upload = abap_true AND ls_table_perm-can_upload = abap_true THEN abap_true ELSE abap_false ).
+  ENDMETHOD.
+
+  METHOD get_table_permissions.
+    SELECT SINGLE can_view, can_create, can_update, can_delete, can_upload
+      FROM ztbl_table_perm
+      WHERE table_name = @iv_table_name
+      INTO CORRESPONDING FIELDS OF @rs_perm.
+
+    IF sy-subrc <> 0.
+      rs_perm-can_view   = abap_true.
+      rs_perm-can_create = abap_true.
+      rs_perm-can_update = abap_true.
+      rs_perm-can_delete = abap_true.
+      rs_perm-can_upload = abap_true.
+    ENDIF.
   ENDMETHOD.
 
   METHOD check_permission.
+    IF is_active_user( iv_username ) = abap_false.
+      RAISE EXCEPTION TYPE zcx_04_no_auth
+        EXPORTING iv_text = |User { iv_username } không tồn tại hoặc không active trong ZTBL_USER_MASTER|.
+    ENDIF.
+
     IF is_admin( iv_username ) = abap_true.
       RETURN.
     ENDIF.

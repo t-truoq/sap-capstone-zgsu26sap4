@@ -1,6 +1,6 @@
 "! <p class="shorttext synchronized">Excel Committer (Phase 4)</p>
 "! Nhận diff preview và ghi DB sau khi user confirm.
-"! Chỉ xử lý NEW/CHANGED, bỏ qua ERROR/UNCHANGED.
+"! Chỉ xử lý NEW/CHANGED/DELETE, bỏ qua ERROR/UNCHANGED.
 "! Có check approval_required trong ZTBL_CONFIG.
 CLASS zcl_excel_committer DEFINITION
   PUBLIC
@@ -17,6 +17,8 @@ CLASS zcl_excel_committer DEFINITION
       RAISING   zcx_excel_pipeline.
 
   PRIVATE SECTION.
+
+    CONSTANTS c_action_field TYPE fieldname VALUE '__ACTION'.
 
     TYPES: BEGIN OF ty_group,
              row_no     TYPE i,
@@ -79,23 +81,27 @@ CLASS zcl_excel_committer IMPLEMENTATION.
       ENDCASE.
     ENDLOOP.
 
-    " 2) Gom NEW/CHANGED thành group theo record_key
+    " 2) Gom NEW/CHANGED/DELETE thành group theo record_key
     DATA lt_groups TYPE tt_group.
     DATA(lt_fields) = zcl_table_inspector=>get_field_list( iv_table_name ).
 
     LOOP AT it_diff INTO DATA(ls_diff)
-      WHERE ( status = zcl_excel_types=>c_status-new OR status = zcl_excel_types=>c_status-changed )
+      WHERE ( status = zcl_excel_types=>c_status-new
+           OR status = zcl_excel_types=>c_status-changed
+           OR status = zcl_excel_types=>c_status-delete )
         AND fieldname IS NOT INITIAL.
 
-      READ TABLE lt_fields INTO DATA(ls_f_commit) WITH KEY field_name = ls_diff-fieldname.
-      IF sy-subrc = 0 AND zcl_excel_types=>is_importable_field_for_table(
-        is_field      = ls_f_commit
-        iv_table_name = iv_table_name
-        it_fields     = lt_fields ) = abap_false.
-        CONTINUE.
-      ENDIF.
-      IF sy-subrc <> 0 AND zcl_excel_types=>is_admin_field( ls_diff-fieldname ) = abap_true.
-        CONTINUE.
+      IF ls_diff-status <> zcl_excel_types=>c_status-delete.
+        READ TABLE lt_fields INTO DATA(ls_f_commit) WITH KEY field_name = ls_diff-fieldname.
+        IF sy-subrc = 0 AND zcl_excel_types=>is_importable_field_for_table(
+          is_field      = ls_f_commit
+          iv_table_name = iv_table_name
+          it_fields     = lt_fields ) = abap_false.
+          CONTINUE.
+        ENDIF.
+        IF sy-subrc <> 0 AND zcl_excel_types=>is_admin_field( ls_diff-fieldname ) = abap_true.
+          CONTINUE.
+        ENDIF.
       ENDIF.
 
       READ TABLE lt_groups ASSIGNING FIELD-SYMBOL(<g>)
@@ -114,12 +120,16 @@ CLASS zcl_excel_committer IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      APPEND VALUE #( fieldname = ls_diff-fieldname
-                      value     = ls_diff-new_value ) TO <g>-cells.
+      APPEND VALUE #(
+        fieldname = ls_diff-fieldname
+        value     = COND string(
+          WHEN ls_diff-status = zcl_excel_types=>c_status-delete
+          THEN ls_diff-old_value
+          ELSE ls_diff-new_value ) ) TO <g>-cells.
     ENDLOOP.
 
     IF lt_groups IS INITIAL.
-      APPEND 'Không có dòng NEW/CHANGED để commit.' TO rs_summary-messages.
+      APPEND 'Không có dòng NEW/CHANGED/DELETE để commit.' TO rs_summary-messages.
       RETURN.
     ENDIF.
 
@@ -147,7 +157,7 @@ CLASS zcl_excel_committer IMPLEMENTATION.
         COMMIT WORK AND WAIT.
       ENDIF.
 
-      APPEND |Đã gửi duyệt: C={ rs_summary-inserted_count }, U={ rs_summary-updated_count }, E={ rs_summary-error_count }. Chờ Approve trên UI.| TO rs_summary-messages.
+      APPEND |Đã gửi duyệt: C={ rs_summary-inserted_count }, U/D={ rs_summary-updated_count }, E={ rs_summary-error_count }. Chờ Approve trên UI.| TO rs_summary-messages.
       RETURN.
     ENDIF.
 
@@ -275,6 +285,42 @@ CLASS zcl_excel_committer IMPLEMENTATION.
                   iv_action_type = zcl_excel_types=>c_action-update ).
               ENDLOOP.
 
+            WHEN zcl_excel_types=>c_status-delete.
+              DATA(lv_where_del) = build_where_from_record_key(
+                                     iv_table_name = iv_table_name
+                                     iv_record_key = ls_group-record_key
+                                     it_fields     = lt_fields ).
+
+              DATA(lv_old_json_del) = zcl_excel_types=>get_cell_value(
+                it_cells = ls_group-cells
+                iv_field = c_action_field ).
+
+              DATA(lv_fk_error_del) = zcl_dynamic_table_reader=>check_foreign_key(
+                iv_table_name = CONV ztde_table_name( iv_table_name )
+                iv_record_key = CONV string( ls_group-record_key ) ).
+              IF lv_fk_error_del IS NOT INITIAL.
+                rs_summary-error_count = rs_summary-error_count + 1.
+                rs_summary-skipped_count = rs_summary-skipped_count + 1.
+                APPEND |Row { ls_group-row_no } delete blocked: { lv_fk_error_del }| TO rs_summary-messages.
+                CONTINUE.
+              ENDIF.
+
+              DELETE FROM (iv_table_name) WHERE (lv_where_del).
+              IF sy-subrc = 0.
+                rs_summary-updated_count = rs_summary-updated_count + 1.
+                zcl_audit_logger=>log_change(
+                  iv_table_name  = CONV ztde_table_name( iv_table_name )
+                  iv_record_key  = CONV ztde_record_key( ls_group-record_key )
+                  iv_field_name  = CONV ztde_field_name( c_action_field )
+                  iv_old_value   = lv_old_json_del
+                  iv_new_value   = ''
+                  iv_action_type = zcl_excel_types=>c_action-delete ).
+              ELSE.
+                rs_summary-error_count = rs_summary-error_count + 1.
+                rs_summary-skipped_count = rs_summary-skipped_count + 1.
+                APPEND |Row { ls_group-row_no }: record not found for DELETE.| TO rs_summary-messages.
+              ENDIF.
+
           ENDCASE.
 
         CATCH cx_root INTO DATA(lx).
@@ -287,7 +333,7 @@ CLASS zcl_excel_committer IMPLEMENTATION.
     IF iv_do_commit = abap_true.
       COMMIT WORK AND WAIT.
     ENDIF.
-    APPEND |Commit xong: I={ rs_summary-inserted_count }, U={ rs_summary-updated_count }, E={ rs_summary-error_count }.| TO rs_summary-messages.
+    APPEND |Commit xong: I={ rs_summary-inserted_count }, U/D={ rs_summary-updated_count }, E={ rs_summary-error_count }.| TO rs_summary-messages.
   ENDMETHOD.
 
 

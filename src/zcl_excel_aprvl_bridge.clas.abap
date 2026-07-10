@@ -1,5 +1,5 @@
-"! Gửi diff Excel (NEW/CHANGED) vào ZTBL_APRVL qua zcl_aprvl_util=>submit_for_approval.
-"! Không ghi bảng nghiệp vụ trực tiếp; audit chỉ chạy khi approver bấm Approve.
+"! Excel approval bridge: submit one BULK approval parent plus many detail items.
+"! CRUD approval flow is not used here and remains unchanged.
 CLASS zcl_excel_aprvl_bridge DEFINITION
   PUBLIC
   FINAL
@@ -22,12 +22,18 @@ CLASS zcl_excel_aprvl_bridge DEFINITION
       CHANGING  cs_summary    TYPE zcl_excel_types=>ty_summary
       RAISING   zcx_excel_pipeline.
 
+  PRIVATE SECTION.
+    CONSTANTS c_action_field TYPE fieldname VALUE '__ACTION'.
+
 ENDCLASS.
 
 
 CLASS zcl_excel_aprvl_bridge IMPLEMENTATION.
 
   METHOD submit_groups.
+    DATA lt_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+    DATA lv_item_no TYPE n LENGTH 6.
+
     LOOP AT it_groups INTO DATA(ls_group).
       TRY.
           DATA(lv_action) = COND ztde_action_type(
@@ -35,6 +41,8 @@ CLASS zcl_excel_aprvl_bridge IMPLEMENTATION.
             THEN zcl_excel_types=>c_action-create
             WHEN ls_group-status = zcl_excel_types=>c_status-changed
             THEN zcl_excel_types=>c_action-update
+            WHEN ls_group-status = zcl_excel_types=>c_status-delete
+            THEN zcl_excel_types=>c_action-delete
             ELSE '' ).
 
           IF lv_action IS INITIAL.
@@ -45,62 +53,81 @@ CLASS zcl_excel_aprvl_bridge IMPLEMENTATION.
           DATA lv_old_json TYPE string.
           DATA lv_new_json TYPE string.
           DATA lr_rec TYPE REF TO data.
-
           DATA(lv_record_key) = ls_group-record_key.
 
-          zcl_excel_record_builder=>build_merged_record(
-            EXPORTING iv_table_name = iv_table_name
-                      it_cells      = ls_group-cells
-                      it_fields     = it_fields
-                      iv_status     = ls_group-status
-                      iv_record_key = lv_record_key
-            IMPORTING ev_old_json   = lv_old_json
-                      ev_new_json   = lv_new_json
-                      er_record     = lr_rec ).
+          IF ls_group-status = zcl_excel_types=>c_status-delete.
+            lv_old_json = zcl_excel_types=>get_cell_value(
+              it_cells = ls_group-cells
+              iv_field = c_action_field ).
+            CLEAR lv_new_json.
+          ELSE.
+            zcl_excel_record_builder=>build_merged_record(
+              EXPORTING iv_table_name = iv_table_name
+                        it_cells      = ls_group-cells
+                        it_fields     = it_fields
+                        iv_status     = ls_group-status
+                        iv_record_key = lv_record_key
+              IMPORTING ev_old_json   = lv_old_json
+                        ev_new_json   = lv_new_json
+                        er_record     = lr_rec ).
 
-          IF ls_group-status = zcl_excel_types=>c_status-new.
-            lv_record_key = zcl_excel_types=>build_record_key_json(
-              iv_table_name = iv_table_name
-              it_fields     = it_fields
-              ir_row        = lr_rec ).
+            IF ls_group-status = zcl_excel_types=>c_status-new.
+              lv_record_key = zcl_excel_types=>build_record_key_json(
+                iv_table_name = iv_table_name
+                it_fields     = it_fields
+                ir_row        = lr_rec ).
+            ENDIF.
+
+            zcl_excel_record_builder=>validate_approval_json(
+              EXPORTING iv_table_name = iv_table_name
+                        iv_new_json   = lv_new_json
+                        it_fields     = it_fields ).
           ENDIF.
 
-          zcl_excel_record_builder=>validate_approval_json(
-            EXPORTING iv_table_name = iv_table_name
-                      iv_new_json   = lv_new_json
-                      it_fields     = it_fields ).
+          lv_item_no = lv_item_no + 1.
+          APPEND VALUE #(
+            item_no     = lv_item_no
+            table_name  = CONV ztde_table_name( iv_table_name )
+            record_key  = CONV ztde_record_key( lv_record_key )
+            action_type = lv_action
+            new_data    = lv_new_json
+            old_data    = lv_old_json ) TO lt_items.
 
-          DATA(ls_submit) = zcl_aprvl_util=>submit_for_approval(
-            iv_table_name  = CONV ztde_table_name( iv_table_name )
-            iv_action_type = lv_action
-            iv_record_key  = CONV ztde_record_key( lv_record_key )
-            iv_new_data    = lv_new_json
-            iv_old_data    = lv_old_json ).
-
-          IF ls_submit-success = abap_true.
-            IF lv_action = zcl_excel_types=>c_action-create.
-              cs_summary-inserted_count = cs_summary-inserted_count + 1.
-            ELSE.
-              cs_summary-updated_count = cs_summary-updated_count + 1.
-            ENDIF.
-            APPEND |Row { ls_group-row_no }: { ls_submit-message }| TO cs_summary-messages.
+          IF lv_action = zcl_excel_types=>c_action-create.
+            cs_summary-inserted_count = cs_summary-inserted_count + 1.
           ELSE.
-            cs_summary-error_count = cs_summary-error_count + 1.
-            cs_summary-skipped_count = cs_summary-skipped_count + 1.
-            APPEND |Row { ls_group-row_no } gửi duyệt lỗi: { ls_submit-message }| TO cs_summary-messages.
+            cs_summary-updated_count = cs_summary-updated_count + 1.
           ENDIF.
 
         CATCH zcx_excel_pipeline INTO DATA(lx_pipe).
           cs_summary-error_count = cs_summary-error_count + 1.
           cs_summary-skipped_count = cs_summary-skipped_count + 1.
-          APPEND |Row { ls_group-row_no } gửi duyệt lỗi: { lx_pipe->get_text( ) }| TO cs_summary-messages.
+          APPEND |Row { ls_group-row_no } submit approval failed: { lx_pipe->get_text( ) }| TO cs_summary-messages.
         CATCH cx_root INTO DATA(lx).
           cs_summary-error_count = cs_summary-error_count + 1.
           cs_summary-skipped_count = cs_summary-skipped_count + 1.
           DATA(lv_cls) = cl_abap_classdescr=>describe_by_object_ref( lx )->get_relative_name( ).
-          APPEND |Row { ls_group-row_no } gửi duyệt lỗi [{ lv_cls }]: { lx->get_text( ) }| TO cs_summary-messages.
+          APPEND |Row { ls_group-row_no } submit approval failed [{ lv_cls }]: { lx->get_text( ) }| TO cs_summary-messages.
       ENDTRY.
     ENDLOOP.
+
+    IF lt_items IS INITIAL.
+      APPEND 'No valid Excel row to submit for approval.' TO cs_summary-messages.
+      RETURN.
+    ENDIF.
+
+    DATA(ls_submit) = zcl_excel_bulk_aprvl=>submit_bulk(
+      iv_table_name = CONV ztde_table_name( iv_table_name )
+      it_items      = lt_items ).
+
+    IF ls_submit-success = abap_true.
+      APPEND |Excel bulk request submitted for approval: { ls_submit-aprvl_id } ({ ls_submit-item_count } item(s)).| TO cs_summary-messages.
+    ELSE.
+      cs_summary-error_count = cs_summary-error_count + lines( lt_items ).
+      cs_summary-skipped_count = cs_summary-skipped_count + lines( lt_items ).
+      CLEAR: cs_summary-inserted_count, cs_summary-updated_count.
+      APPEND |Excel bulk approval submit failed: { ls_submit-message }| TO cs_summary-messages.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

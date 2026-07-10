@@ -1,10 +1,10 @@
 {
   "BASEINFO": {
     "FROM": [
-      "ZTBL_APRVL"
+      "ZTBL_TABLE_PERM"
     ],
     "ASSOCIATED": [
-      "ZI_APRVL_ITEM"
+      "ZTBL_USER_MASTER"
     ]
   }
 }

@@ -5,4 +5,11 @@ define behavior for ZC_APRVL_REQUEST alias AprvlRequest
 {
   use action approve;
   use action reject;
+
+  use association _Items;
+}
+
+define behavior for ZC_APRVL_ITEM alias AprvlItem
+{
+  use association _AprvlRequest;
 }

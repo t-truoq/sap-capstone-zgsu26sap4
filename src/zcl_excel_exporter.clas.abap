@@ -30,6 +30,7 @@ CLASS zcl_excel_exporter DEFINITION
   PRIVATE SECTION.
 
     CONSTANTS c_source_table_prefix TYPE string VALUE '__SOURCE_TABLE='.
+    CONSTANTS c_action_field        TYPE string VALUE '__ACTION'.
 
     CLASS-METHODS validate_table_name
       IMPORTING iv_table_name TYPE tabname
@@ -248,12 +249,17 @@ CLASS zcl_excel_exporter IMPLEMENTATION.
             CONTINUE.
           ENDIF.
           APPEND VALUE #(
-            col_index   = lines( lt_export_cols ) + 1
+            col_index   = lines( lt_export_cols ) + 2
             field_name  = ls_field-field_name
             domain_name = ls_field-domain_name ) TO lt_export_cols.
         ENDLOOP.
 
         " ---- Header row (row 1) ----
+        lo_worksheet->set_cell(
+          ip_column = 'A'
+          ip_row    = 1
+          ip_value  = c_action_field ).
+
         LOOP AT lt_export_cols INTO DATA(ls_col).
           READ TABLE it_fields INTO ls_field WITH KEY field_name = ls_col-field_name.
           lv_col_alpha = zcl_excel_common=>convert_column2alpha( ls_col-col_index ).
@@ -269,7 +275,7 @@ CLASS zcl_excel_exporter IMPLEMENTATION.
             ip_value  = lv_header ).
         ENDLOOP.
 
-        lv_col_alpha = zcl_excel_common=>convert_column2alpha( lines( lt_export_cols ) + 1 ).
+        lv_col_alpha = zcl_excel_common=>convert_column2alpha( lines( lt_export_cols ) + 2 ).
         lo_worksheet->set_cell(
           ip_column = lv_col_alpha
           ip_row    = 1
