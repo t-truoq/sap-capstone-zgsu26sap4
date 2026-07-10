@@ -24,6 +24,7 @@ CLASS zcl_excel_importer DEFINITION
   PRIVATE SECTION.
 
     CONSTANTS c_source_table_prefix TYPE string VALUE '__SOURCE_TABLE='.
+    CONSTANTS c_action_field        TYPE string VALUE '__ACTION'.
 
     TYPES: BEGIN OF ty_colmap,
              column    TYPE i,
@@ -273,6 +274,19 @@ CLASS zcl_excel_importer IMPLEMENTATION.
           CONTINUE.
         ENDIF.
         APPEND lv_col TO et_header_cols.   " cột này có header
+
+        IF lv_header_norm = c_action_field.
+          READ TABLE et_colmap TRANSPORTING NO FIELDS
+            WITH KEY fieldname = CONV fieldname( c_action_field ).
+          IF sy-subrc = 0.
+            APPEND |Column '{ lv_value }' maps to field { c_action_field } more than once; duplicate column was ignored.| TO et_messages.
+          ELSE.
+            APPEND VALUE #( column    = lv_col
+                            fieldname = CONV fieldname( c_action_field ) ) TO et_colmap.
+          ENDIF.
+          lv_col = lv_col + 1.
+          CONTINUE.
+        ENDIF.
 
         DATA lv_found TYPE abap_bool.
         lv_found = abap_false.

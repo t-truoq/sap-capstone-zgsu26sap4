@@ -1,13 +1,13 @@
 {
   "BASEINFO": {
     "FROM": [
-      "ZI_APRVL_REQUEST"
+      "ZI_AUTH_TABLE_PERM"
     ],
     "ASSOCIATED": [
-      "ZC_APRVL_ITEM"
+      "ZTBL_USER_MASTER"
     ],
     "BASE": [
-      "ZI_APRVL_REQUEST"
+      "ZI_AUTH_TABLE_PERM"
     ]
   }
 }

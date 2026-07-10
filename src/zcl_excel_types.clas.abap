@@ -49,6 +49,7 @@ CLASS zcl_excel_types DEFINITION
     CONSTANTS: BEGIN OF c_status,
                  new       TYPE c LENGTH 10 VALUE 'NEW',
                  changed   TYPE c LENGTH 10 VALUE 'CHANGED',
+                 delete    TYPE c LENGTH 10 VALUE 'DELETE',
                  unchanged TYPE c LENGTH 10 VALUE 'UNCHANGED',
                  error     TYPE c LENGTH 10 VALUE 'ERROR',
                END OF c_status.

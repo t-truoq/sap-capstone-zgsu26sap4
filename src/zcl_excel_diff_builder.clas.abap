@@ -17,6 +17,8 @@ CLASS zcl_excel_diff_builder DEFINITION
 
   PRIVATE SECTION.
 
+    CONSTANTS c_action_field TYPE fieldname VALUE '__ACTION'.
+
     CLASS-METHODS validate_row
       IMPORTING iv_table_name      TYPE tabname
                 it_fields          TYPE zcl_table_inspector=>tt_field_info
@@ -141,6 +143,73 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
                         record_key = lv_fkey
                         status     = zcl_excel_types=>c_status-error
                         message    = |Duplicate key in uploaded file ({ ls_kc-cnt } rows with the same key). Fix duplicate key { lv_fkey } before import.| ) TO rt_diff.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_requested_action) = zcl_excel_types=>get_cell_value(
+        it_cells = ls_row-cells
+        iv_field = c_action_field ).
+      CONDENSE lv_requested_action.
+      TRANSLATE lv_requested_action TO UPPER CASE.
+
+      IF lv_requested_action IS NOT INITIAL
+         AND lv_requested_action <> 'C'
+         AND lv_requested_action <> 'CREATE'
+         AND lv_requested_action <> 'U'
+         AND lv_requested_action <> 'UPDATE'
+         AND lv_requested_action <> 'D'
+         AND lv_requested_action <> 'DELETE'.
+        APPEND VALUE #( row_no     = ls_row-row_no
+                        table_name = iv_table_name
+                        record_key = lv_fkey
+                        status     = zcl_excel_types=>c_status-error
+                        message    = |Invalid __ACTION '{ lv_requested_action }'. Allowed values: C, CREATE, U, UPDATE, D, DELETE.| ) TO rt_diff.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_requested_action = 'D' OR lv_requested_action = 'DELETE'.
+        DATA(lv_del_where) = zcl_excel_types=>build_where_from_cells(
+          iv_table_name = iv_table_name
+          it_fields     = lt_fields
+          it_cells      = ls_row-cells ).
+
+        IF lv_del_where IS INITIAL.
+          APPEND VALUE #( row_no     = ls_row-row_no
+                          table_name = iv_table_name
+                          record_key = lv_fkey
+                          status     = zcl_excel_types=>c_status-error
+                          message    = |Cannot identify record to delete for table { iv_table_name }. Check key columns.| ) TO rt_diff.
+          CONTINUE.
+        ENDIF.
+
+        TRY.
+            DATA(lr_del_db) = zcl_excel_record_builder=>read_db_row(
+              iv_table_name = iv_table_name
+              iv_where      = lv_del_where ).
+
+            DATA(lv_del_key) = zcl_excel_types=>build_record_key_json(
+              iv_table_name = iv_table_name
+              it_fields     = lt_fields
+              ir_row        = lr_del_db ).
+
+            ASSIGN lr_del_db->* TO FIELD-SYMBOL(<del_db_row>).
+            DATA(lv_old_json) = zcl_json_helper=>serialize( <del_db_row> ).
+
+            APPEND VALUE #( row_no     = ls_row-row_no
+                            table_name = iv_table_name
+                            record_key = lv_del_key
+                            fieldname  = c_action_field
+                            old_value  = lv_old_json
+                            new_value  = ''
+                            status     = zcl_excel_types=>c_status-delete
+                            message    = 'Record marked for deletion by __ACTION.' ) TO rt_diff.
+          CATCH cx_root INTO DATA(lx_del).
+            APPEND VALUE #( row_no     = ls_row-row_no
+                            table_name = iv_table_name
+                            record_key = lv_fkey
+                            status     = zcl_excel_types=>c_status-error
+                            message    = |Delete row does not match an existing record: { lx_del->get_text( ) }| ) TO rt_diff.
+        ENDTRY.
         CONTINUE.
       ENDIF.
 

@@ -26,6 +26,8 @@ etag master Status
   field ( readonly ) AprvlComment;
   field ( readonly ) Status;
 
+  association _Items;
+
   mapping for ztbl_aprvl corresponding
   {
     AprvlId      = aprvl_id;
@@ -40,5 +42,36 @@ etag master Status
     ApprovedBy   = approved_by;
     ApprovedAt   = approved_at;
     AprvlComment = aprvl_comment;
+  }
+}
+
+define behavior for ZI_APRVL_ITEM alias AprvlItem
+persistent table ztbl_aprvl_item
+lock dependent by _AprvlRequest
+authorization dependent by _AprvlRequest
+{
+  field ( readonly ) AprvlId;
+  field ( readonly ) ItemNo;
+  field ( readonly ) TableName;
+  field ( readonly ) RecordKey;
+  field ( readonly ) ActionType;
+  field ( readonly ) Status;
+  field ( readonly ) NewData;
+  field ( readonly ) OldData;
+  field ( readonly ) Message;
+
+  association _AprvlRequest;
+
+  mapping for ztbl_aprvl_item corresponding
+  {
+    AprvlId    = aprvl_id;
+    ItemNo     = item_no;
+    TableName  = table_name;
+    RecordKey  = record_key;
+    ActionType = action_type;
+    Status     = status;
+    NewData    = new_data;
+    OldData    = old_data;
+    Message    = message;
   }
 }

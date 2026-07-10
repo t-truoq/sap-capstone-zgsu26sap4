@@ -1,0 +1,9 @@
+projection;
+strict ( 2 );
+
+define behavior for ZC_AUTH_TABLE_PERM alias AuthTablePerm
+{
+  use create;
+  use update;
+  use delete;
+}

@@ -1,4 +1,3 @@
-
 CLASS lhc_aprvlrequest DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
     METHODS get_instance_authorizations FOR INSTANCE AUTHORIZATION
@@ -46,6 +45,20 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
             message = |Request { ls_req-aprvlid } is not in PENDING status|
           )
         ) TO result.
+        CONTINUE.
+      ENDIF.
+
+      IF ls_req-recordkey = 'BULK'.
+        DATA(ls_bulk_result) = zcl_excel_bulk_aprvl=>approve_bulk( ls_req-aprvlid ).
+
+        APPEND VALUE #(
+          %tky   = ls_req-%tky
+          %param = VALUE #(
+            success = ls_bulk_result-success
+            message = ls_bulk_result-message
+          )
+        ) TO result.
+
         CONTINUE.
       ENDIF.
 
@@ -158,7 +171,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
   METHOD reject.
     READ ENTITIES OF zi_aprvl_request IN LOCAL MODE
       ENTITY aprvlrequest
-        FIELDS ( aprvlid status )
+        FIELDS ( aprvlid recordkey status )
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_requests).
 
@@ -183,6 +196,22 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         THEN ls_key-%param-remarks
         ELSE 'Rejected by admin'
       ).
+
+      IF ls_req-recordkey = 'BULK'.
+        DATA(ls_bulk_reject) = zcl_excel_bulk_aprvl=>reject_bulk(
+          iv_aprvl_id = ls_req-aprvlid
+          iv_remarks  = lv_remarks ).
+
+        APPEND VALUE #(
+          %tky   = ls_req-%tky
+          %param = VALUE #(
+            success = ls_bulk_reject-success
+            message = ls_bulk_reject-message
+          )
+        ) TO result.
+
+        CONTINUE.
+      ENDIF.
 
       zcl_aprvl_util=>update_status(
         iv_aprvl_id = ls_req-aprvlid

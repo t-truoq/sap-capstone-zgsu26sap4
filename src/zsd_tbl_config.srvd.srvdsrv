@@ -5,4 +5,5 @@ define service ZSD_TBL_CONFIG {
   expose ZC_TBL_AUDIT as AuditLog;
   expose ZI_SH_TABLE_NAME as TableNameVH;
   expose ZC_APRVL_REQUEST as ApprovalRequest;
+  expose ZC_APRVL_ITEM as ApprovalItem;
 }
