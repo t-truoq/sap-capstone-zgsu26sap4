@@ -3,10 +3,9 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZCX_PENDING_EXISTS</CLSNAME>
+    <CLSNAME>ZCL_EXCEL_CONFLICT_DIFF_BUILD</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>Conflicting pending approval exists</DESCRIPT>
-    <CATEGORY>40</CATEGORY>
+    <DESCRIPT>ZCL_EXCEL_CONFLICT_DIFF_BUILD</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

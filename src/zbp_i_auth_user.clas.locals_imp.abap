@@ -26,7 +26,7 @@ CLASS lhc_AuthUser IMPLEMENTATION.
       RESULT DATA(lt_users).
 
     LOOP AT lt_users INTO DATA(ls_user).
-      zcl_auth_permission_sync=>sync_user(
+      zcl_auth_helper=>sync_user(
         iv_username    = ls_user-username
         iv_role_type   = ls_user-roletype
         iv_active_flag = ls_user-activeflag ).

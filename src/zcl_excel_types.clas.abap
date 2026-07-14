@@ -2,13 +2,11 @@
 "! Chỉ chứa TYPES + CONSTANTS, không có logic.
 "! Field metadata KHÔNG khai báo lại ở đây — dùng zcl_table_inspector=>tt_field_info.
 CLASS zcl_excel_types DEFINITION
-  PUBLIC
+PUBLIC
   FINAL
   CREATE PUBLIC.
-
-  PUBLIC SECTION.
-
-    " 1 ô dữ liệu = field + value dạng string
+PUBLIC SECTION.
+" 1 ô dữ liệu = field + value dạng string
     TYPES: BEGIN OF ty_cell,
              fieldname TYPE fieldname,
              value     TYPE string,
@@ -159,9 +157,49 @@ CLASS zcl_excel_types DEFINITION
                 it_fields            TYPE zcl_table_inspector=>tt_field_info
       RETURNING VALUE(rv_ok)         TYPE abap_bool.
 
-  PRIVATE SECTION.
+CLASS-METHODS build_where_from_record_key
+      IMPORTING iv_table_name TYPE tabname
+                iv_record_key TYPE string
+                it_fields     TYPE zcl_table_inspector=>tt_field_info
+      RETURNING VALUE(rv_where) TYPE string
+      RAISING   zcx_excel_pipeline.
 
-    CLASS-METHODS is_config_flag
+    CLASS-METHODS apply_cells_to_record
+      IMPORTING iv_table_name TYPE tabname
+                it_cells      TYPE zcl_excel_types=>tt_cell
+                it_fields     TYPE zcl_table_inspector=>tt_field_info
+      CHANGING  cr_record     TYPE REF TO data
+      RAISING   zcx_excel_pipeline.
+
+    CLASS-METHODS build_merged_record
+      IMPORTING iv_table_name TYPE tabname
+                it_cells      TYPE zcl_excel_types=>tt_cell
+                it_fields     TYPE zcl_table_inspector=>tt_field_info
+                iv_status     TYPE c
+                iv_record_key TYPE string
+      EXPORTING ev_old_json   TYPE string
+                ev_new_json   TYPE string
+                er_record     TYPE REF TO data
+      RAISING   zcx_excel_pipeline.
+
+    CLASS-METHODS check_business_key_collision
+      IMPORTING iv_table_name TYPE tabname
+                it_fields     TYPE zcl_table_inspector=>tt_field_info
+                ir_db_row     TYPE REF TO data
+                it_cells      TYPE zcl_excel_types=>tt_cell
+      RETURNING VALUE(rv_error) TYPE string.
+
+    "! Deserialize new_data ngược lại struct — bắt lỗi tên field JSON ≠ DDIC trước khi gửi duyệt.
+    CLASS-METHODS validate_approval_json
+      IMPORTING iv_table_name TYPE tabname
+                iv_new_json   TYPE string
+                it_fields     TYPE zcl_table_inspector=>tt_field_info
+      RAISING   zcx_excel_pipeline.
+
+    "! Gán admin field ngay trước INSERT (Approve / commit trực tiếp).
+    "! Gán LAST_CHANGED_* / CHANGED_* ngay trước UPDATE (Approve / commit trực tiếp).
+PRIVATE SECTION.
+CLASS-METHODS is_config_flag
       IMPORTING iv_flag TYPE ztde_yesno
       RETURNING VALUE(rv_on) TYPE abap_bool.
 
@@ -171,12 +209,51 @@ CLASS zcl_excel_types DEFINITION
       CHANGING  cv_json  TYPE string
                 cv_first TYPE abap_bool.
 
+    "! CREATED_AT trống nhưng CHANGED_AT đã có (khác kiểu utclong/timestampl) → copy.
+    "! JSON cho Approve: business + ENTITY_ID + MANDT; giữ TIMESTAMPL admin, bỏ UTCLONG.
+    CLASS-METHODS serialize_new_for_approval
+      IMPORTING iv_table_name TYPE tabname
+                it_fields     TYPE zcl_table_inspector=>tt_field_info
+                it_cells      TYPE zcl_excel_types=>tt_cell
+                ir_record     TYPE REF TO data
+      RETURNING VALUE(rv_json) TYPE string.
+
+    CLASS-METHODS is_admin_timestamp_field
+      IMPORTING iv_fieldname TYPE fieldname
+      RETURNING VALUE(rv_skip) TYPE abap_bool.
+
+    CLASS-METHODS is_utclong_field
+      IMPORTING io_sdesc     TYPE REF TO cl_abap_structdescr
+                iv_fieldname TYPE fieldname
+      RETURNING VALUE(rv_utclong) TYPE abap_bool.
+
+    CLASS-METHODS append_field_to_approval_json
+      IMPORTING iv_table_name TYPE tabname
+                is_field      TYPE zcl_table_inspector=>ty_field_info
+                it_fields     TYPE zcl_table_inspector=>tt_field_info
+                it_cells      TYPE zcl_excel_types=>tt_cell
+                ir_record     TYPE REF TO data
+      CHANGING  cv_json       TYPE string
+                cv_first      TYPE abap_bool
+                ct_seen       TYPE string_table.
+
+    CLASS-METHODS append_json_field
+      IMPORTING iv_name  TYPE string
+                iv_value TYPE string
+                iv_quote TYPE abap_bool DEFAULT abap_true
+      CHANGING  cv_json  TYPE string
+                cv_first TYPE abap_bool.
+
+    CLASS-METHODS component_to_json_value
+      IMPORTING iv_table_name TYPE tabname
+                iv_fieldname  TYPE fieldname
+                ir_component  TYPE REF TO data
+      RETURNING VALUE(rv_value) TYPE string.
 ENDCLASS.
 
 
 CLASS zcl_excel_types IMPLEMENTATION.
-
-  METHOD is_admin_field.
+METHOD is_admin_field.
     DATA lv_fld TYPE string.
     lv_fld = iv_fieldname.
     CONDENSE lv_fld.
@@ -258,7 +335,7 @@ CLASS zcl_excel_types IMPLEMENTATION.
     ENDIF.
 
     " DDIC key nhưng không nằm trong business key (get_match_key_fields) → ẩn khỏi template/import
-    DATA(lt_ddic) = zcl_dynamic_table_reader=>get_key_fields( iv_table_name ).
+    DATA(lt_ddic) = zcl_dyn_record_handler=>get_key_fields( iv_table_name ).
     READ TABLE lt_ddic TRANSPORTING NO FIELDS
       WITH KEY table_line = CONV string( is_field-field_name ).
     IF sy-subrc <> 0.
@@ -299,7 +376,7 @@ CLASS zcl_excel_types IMPLEMENTATION.
     ENDIF.
 
     " Fallback 2: DDIC key fields còn importable theo config
-    DATA(lt_ddic) = zcl_dynamic_table_reader=>get_key_fields( iv_table_name ).
+    DATA(lt_ddic) = zcl_dyn_record_handler=>get_key_fields( iv_table_name ).
     LOOP AT lt_ddic INTO DATA(lv_k).
       IF lv_k = 'MANDT' OR lv_k = 'CLIENT'.
         CONTINUE.
@@ -354,7 +431,7 @@ CLASS zcl_excel_types IMPLEMENTATION.
 
 
   METHOD get_ddic_key_fields.
-    rt_keys = zcl_dynamic_table_reader=>get_key_fields( iv_table_name ).
+    rt_keys = zcl_dyn_record_handler=>get_key_fields( iv_table_name ).
     DELETE rt_keys WHERE table_line = 'MANDT' OR table_line = 'CLIENT'.
   ENDMETHOD.
 
@@ -491,7 +568,7 @@ CLASS zcl_excel_types IMPLEMENTATION.
       DATA lr_rec TYPE REF TO data.
       CREATE DATA lr_rec TYPE (iv_table_name).
       TRY.
-          zcl_json_helper=>deserialize(
+          zcl_dyn_record_handler=>deserialize(
             EXPORTING iv_json   = iv_record_key
             CHANGING  ca_record = lr_rec ).
         CATCH cx_root INTO DATA(lxj).
@@ -545,6 +622,417 @@ CLASS zcl_excel_types IMPLEMENTATION.
       is_field      = is_field
       iv_table_name = iv_table_name
       it_fields     = it_fields ).
+  ENDMETHOD.
+
+METHOD build_where_from_record_key.
+    DATA(lt_keys) = zcl_excel_types=>get_where_key_fields(
+      iv_table_name = iv_table_name
+      it_fields     = it_fields
+      iv_record_key = iv_record_key ).
+
+    DATA lr_rec TYPE REF TO data.
+    CREATE DATA lr_rec TYPE (iv_table_name).
+
+    TRY.
+        zcl_dyn_record_handler=>deserialize(
+          EXPORTING iv_json   = iv_record_key
+          CHANGING  ca_record = lr_rec ).
+      CATCH cx_root INTO DATA(lxj).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |record_key JSON không hợp lệ: { lxj->get_text( ) }|.
+    ENDTRY.
+
+    rv_where = zcl_dyn_record_handler=>build_where_clause(
+      it_key_fields  = lt_keys
+      ir_record      = lr_rec
+      iv_keep_spaces = abap_true ).
+
+    IF rv_where IS INITIAL.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = 'Không build được WHERE từ record_key.'.
+    ENDIF.
+  ENDMETHOD.
+METHOD apply_cells_to_record.
+    IF it_cells IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    DATA lv_json TYPE string.
+    lv_json = '{'.
+    DATA lv_first TYPE abap_bool VALUE abap_true.
+
+    LOOP AT it_cells INTO DATA(ls_cell).
+      READ TABLE it_fields INTO DATA(ls_f) WITH KEY field_name = ls_cell-fieldname.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF zcl_excel_types=>is_match_only_field(
+           is_field      = ls_f
+           iv_table_name = iv_table_name
+           it_fields     = it_fields ) = abap_true.
+        CONTINUE.
+      ENDIF.
+      IF zcl_excel_types=>is_importable_field_for_table(
+           is_field      = ls_f
+           iv_table_name = iv_table_name
+           it_fields     = it_fields ) = abap_false.
+        CONTINUE.
+      ENDIF.
+      IF ls_cell-value IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_val) = ls_cell-value.
+      IF ls_f-inttype = 'D' AND strlen( lv_val ) = 8 AND lv_val CO '0123456789'.
+        lv_val = |{ lv_val(4) }-{ lv_val+4(2) }-{ lv_val+6(2) }|.
+      ENDIF.
+
+      DATA(lv_esc) = lv_val.
+      REPLACE ALL OCCURRENCES OF `\` IN lv_esc WITH `\\`.
+      REPLACE ALL OCCURRENCES OF `"` IN lv_esc WITH `\"`.
+
+      IF lv_first = abap_false.
+        lv_json = lv_json && ','.
+      ELSE.
+        lv_first = abap_false.
+      ENDIF.
+
+      IF ls_f-inttype = 'I' OR ls_f-inttype = 'P'
+        OR ls_f-inttype = 'F' OR ls_f-inttype = 'N'.
+        lv_json = lv_json && |"{ ls_cell-fieldname }":{ lv_esc }|.
+      ELSE.
+        lv_json = lv_json && |"{ ls_cell-fieldname }":"{ lv_esc }"|.
+      ENDIF.
+    ENDLOOP.
+    lv_json = lv_json && '}'.
+
+    IF lv_json = '{}'.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        zcl_dyn_record_handler=>deserialize(
+          EXPORTING iv_json   = lv_json
+          CHANGING  ca_record = cr_record ).
+      CATCH cx_root INTO DATA(lx).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |Gán field Excel lỗi: { lx->get_text( ) }|.
+    ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD build_merged_record.
+    CLEAR: ev_old_json, ev_new_json.
+    CREATE DATA er_record TYPE (iv_table_name).
+    ASSIGN er_record->* TO FIELD-SYMBOL(<wa>).
+    DATA lr_db TYPE REF TO data.
+
+    IF iv_status = zcl_excel_types=>c_status-changed.
+      DATA(lv_where) = build_where_from_record_key(
+        iv_table_name = iv_table_name
+        iv_record_key = iv_record_key
+        it_fields     = it_fields ).
+
+      lr_db = zcl_dyn_record_handler=>get_single_record(
+        iv_table_name = iv_table_name
+        iv_where      = lv_where ).
+
+      ASSIGN lr_db->* TO FIELD-SYMBOL(<db_row>).
+      TRY.
+          <wa> = <db_row>.
+        CATCH cx_sy_conversion_not_supported INTO DATA(lx_copy).
+          RAISE EXCEPTION TYPE zcx_excel_pipeline
+            EXPORTING iv_text = |Copy DB row: { lx_copy->get_text( ) }|.
+      ENDTRY.
+      ev_old_json = zcl_dyn_record_handler=>serialize( <wa> ).
+    ENDIF.
+
+    apply_cells_to_record(
+      EXPORTING iv_table_name = iv_table_name
+                it_cells      = it_cells
+                it_fields     = it_fields
+      CHANGING  cr_record     = er_record ).
+
+    IF iv_status = zcl_excel_types=>c_status-new.
+      zcl_dyn_record_handler=>on_create(
+        iv_table_name = iv_table_name
+        ir_record     = er_record ).
+      " Create → JSON tối thiểu; tránh admin date/timestamp initial gây lỗi deserialize lúc Approve
+      ev_new_json = serialize_new_for_approval(
+        iv_table_name = iv_table_name
+        it_fields     = it_fields
+        it_cells      = it_cells
+        ir_record     = er_record ).
+    ELSE.
+      zcl_dyn_record_handler=>on_update(
+        ir_new_record = er_record
+        ir_old_record = lr_db ).
+      ev_new_json = serialize_new_for_approval(
+        iv_table_name = iv_table_name
+        it_fields     = it_fields
+        it_cells      = it_cells
+        ir_record     = er_record ).
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD check_business_key_collision.
+    DATA(lv_eid_f) = zcl_excel_types=>get_entity_id_field( iv_table_name ).
+    IF lv_eid_f IS INITIAL OR ir_db_row IS NOT BOUND.
+      RETURN.
+    ENDIF.
+
+    ASSIGN ir_db_row->* TO FIELD-SYMBOL(<db>).
+    ASSIGN COMPONENT lv_eid_f OF STRUCTURE <db> TO FIELD-SYMBOL(<db_eid>).
+    IF sy-subrc <> 0 OR <db_eid> IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    DATA(lt_biz) = zcl_excel_types=>get_match_key_fields(
+      it_fields     = it_fields
+      iv_table_name = iv_table_name ).
+
+    LOOP AT lt_biz INTO DATA(lv_bk).
+      DATA(lv_new) = zcl_excel_types=>get_cell_value(
+        it_cells = it_cells iv_field = CONV #( lv_bk ) ).
+      IF lv_new IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      ASSIGN COMPONENT lv_bk OF STRUCTURE <db> TO FIELD-SYMBOL(<db_bk>).
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      DATA(lv_old) = |{ <db_bk> }|.
+      CONDENSE lv_old.
+      DATA(lv_new_c) = lv_new.
+      CONDENSE lv_new_c.
+      IF lv_old = lv_new_c.
+        CONTINUE.
+      ENDIF.
+
+      REPLACE ALL OCCURRENCES OF |'| IN lv_new WITH |''|.
+      DATA(lv_eid_esc) = |{ <db_eid> }|.
+      REPLACE ALL OCCURRENCES OF |'| IN lv_eid_esc WITH |''|.
+      DATA(lv_where) = |{ lv_bk } = '{ lv_new }' AND { lv_eid_f } <> '{ lv_eid_esc }'|.
+
+      TRY.
+          DATA(lr_hit) = zcl_dyn_record_handler=>get_table_data(
+                           iv_table_name   = iv_table_name
+                           iv_where_clause = lv_where
+                           iv_max_rows     = 1 ).
+          FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
+          ASSIGN lr_hit->* TO <tab>.
+          IF <tab> IS ASSIGNED AND lines( <tab> ) > 0.
+            rv_error = |Field { lv_bk } giá trị '{ lv_new }' đã thuộc bản ghi khác (trùng mã nghiệp vụ)|.
+            RETURN.
+          ENDIF.
+        CATCH cx_sy_dynamic_osql_error.
+          CONTINUE.
+      ENDTRY.
+    ENDLOOP.
+  ENDMETHOD.
+METHOD append_json_field.
+    IF iv_quote = abap_true.
+      DATA(lv_esc) = iv_value.
+      REPLACE ALL OCCURRENCES OF `\` IN lv_esc WITH `\\`.
+      REPLACE ALL OCCURRENCES OF `"` IN lv_esc WITH `\"`.
+      DATA(lv_part) = |"{ iv_name }":"{ lv_esc }"|.
+    ELSE.
+      lv_part = |"{ iv_name }":{ iv_value }|.
+    ENDIF.
+    IF cv_first = abap_true.
+      cv_first = abap_false.
+      cv_json = lv_part.
+    ELSE.
+      cv_json = cv_json && ',' && lv_part.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD component_to_json_value.
+    DATA(lo_elem) = CAST cl_abap_elemdescr(
+      cl_abap_typedescr=>describe_by_data( ir_component->* ) ).
+
+    CASE lo_elem->type_kind.
+      WHEN cl_abap_typedescr=>typekind_hex.
+        rv_value = |{ ir_component->* }|.
+        CONDENSE rv_value NO-GAPS.
+        TRANSLATE rv_value TO UPPER CASE.
+      WHEN cl_abap_typedescr=>typekind_date.
+        DATA lv_d TYPE d.
+        lv_d = ir_component->*.
+        IF lv_d IS INITIAL.
+          CLEAR rv_value.
+        ELSE.
+          rv_value = |{ lv_d DATE = ISO }|.
+        ENDIF.
+      WHEN cl_abap_typedescr=>typekind_int
+        OR cl_abap_typedescr=>typekind_int8
+        OR cl_abap_typedescr=>typekind_packed
+        OR cl_abap_typedescr=>typekind_float.
+        rv_value = |{ ir_component->* }|.
+        CONDENSE rv_value.
+      WHEN OTHERS.
+        rv_value = |{ ir_component->* }|.
+        CONDENSE rv_value.
+    ENDCASE.
+  ENDMETHOD.
+
+
+  METHOD is_admin_timestamp_field.
+    DATA(lv_f) = iv_fieldname.
+    TRANSLATE lv_f TO UPPER CASE.
+    rv_skip = COND #(
+      WHEN lv_f = 'CREATED_AT'
+        OR lv_f = 'CHANGED_AT'
+        OR lv_f = 'LAST_CHANGED_AT'
+        OR lv_f = 'LOCAL_LAST_CHANGED_AT'
+      THEN abap_true ELSE abap_false ).
+  ENDMETHOD.
+
+
+  METHOD append_field_to_approval_json.
+    READ TABLE ct_seen TRANSPORTING NO FIELDS
+      WITH KEY table_line = CONV string( is_field-field_name ).
+    IF sy-subrc = 0.
+      RETURN.
+    ENDIF.
+
+    ASSIGN ir_record->* TO FIELD-SYMBOL(<wa>).
+    DATA(lv_name) = CONV string( is_field-field_name ).
+    DATA lv_json_val TYPE string.
+    DATA lv_quote TYPE abap_bool VALUE abap_true.
+
+    " JSON key phải trùng tên component DDIC — không fallback key sai (vd COMPANY_CODE vs COMPANY)
+    ASSIGN COMPONENT is_field-field_name OF STRUCTURE <wa> TO FIELD-SYMBOL(<cv>).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    IF <cv> IS NOT INITIAL.
+      DATA(lr_comp) = REF #( <cv> ).
+      lv_json_val = component_to_json_value(
+        iv_table_name = iv_table_name
+        iv_fieldname  = is_field-field_name
+        ir_component  = lr_comp ).
+    ENDIF.
+
+    IF lv_json_val IS INITIAL.
+      DATA(lv_cell) = zcl_excel_types=>get_cell_value(
+        it_cells = it_cells iv_field = is_field-field_name ).
+      IF lv_cell IS INITIAL.
+        RETURN.
+      ENDIF.
+      lv_json_val = lv_cell.
+      IF is_field-inttype = 'D' AND strlen( lv_json_val ) = 8 AND lv_json_val CO '0123456789'.
+        lv_json_val = |{ lv_json_val(4) }-{ lv_json_val+4(2) }-{ lv_json_val+6(2) }|.
+      ENDIF.
+    ENDIF.
+
+    IF is_field-inttype = 'I' OR is_field-inttype = 'P'
+      OR is_field-inttype = 'F' OR is_field-inttype = 'N'.
+      lv_quote = abap_false.
+    ENDIF.
+
+    APPEND lv_name TO ct_seen.
+    append_json_field(
+      EXPORTING iv_name  = lv_name
+                iv_value = lv_json_val
+                iv_quote = lv_quote
+      CHANGING  cv_json  = cv_json
+                cv_first = cv_first ).
+  ENDMETHOD.
+
+
+  METHOD is_utclong_field.
+    DATA(lo_elem) = CAST cl_abap_elemdescr(
+      io_sdesc->get_component_type( iv_fieldname ) ).
+    rv_utclong = COND #(
+      WHEN lo_elem->type_kind = cl_abap_typedescr=>typekind_int8
+      THEN abap_true ELSE abap_false ).
+  ENDMETHOD.
+
+
+  METHOD serialize_new_for_approval.
+    " ZBP trên SAP không gọi apply_admin_on_insert → CREATED_AT (TIMESTAMPL) phải có trong JSON.
+    " Chỉ bỏ admin timestamp kiểu UTCLONG (int8): /ui2/cl_json không round-trip → CX_SY_CONVERSION_NO_DATE_TIME.
+    ASSIGN ir_record->* TO FIELD-SYMBOL(<wa>).
+    DATA lr_copy TYPE REF TO data.
+    CREATE DATA lr_copy LIKE ir_record->*.
+    ASSIGN lr_copy->* TO FIELD-SYMBOL(<cpy>).
+    <cpy> = <wa>.
+
+    DATA(lo_sdesc) = CAST cl_abap_structdescr(
+      cl_abap_typedescr=>describe_by_data( <wa> ) ).
+    LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_comp).
+      IF is_admin_timestamp_field( CONV fieldname( ls_comp-name ) ) = abap_false.
+        CONTINUE.
+      ENDIF.
+      IF is_utclong_field(
+           io_sdesc     = lo_sdesc
+           iv_fieldname = CONV fieldname( ls_comp-name ) ) = abap_false.
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT ls_comp-name OF STRUCTURE <cpy> TO FIELD-SYMBOL(<ts>).
+      IF sy-subrc = 0.
+        CLEAR <ts>.
+      ENDIF.
+    ENDLOOP.
+
+    rv_json = zcl_dyn_record_handler=>serialize( <cpy> ).
+  ENDMETHOD.
+
+
+  METHOD validate_approval_json.
+    IF iv_new_json IS INITIAL OR iv_new_json = '{}'.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = 'new_data approval rỗng — không gửi duyệt được.'.
+    ENDIF.
+
+    DATA lr_test TYPE REF TO data.
+    CREATE DATA lr_test TYPE (iv_table_name).
+    TRY.
+        zcl_dyn_record_handler=>deserialize(
+          EXPORTING iv_json   = iv_new_json
+          CHANGING  ca_record = lr_test ).
+      CATCH cx_root INTO DATA(lx_des).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |new_data không deserialize được (Approve sẽ fail): { lx_des->get_text( ) }|.
+    ENDTRY.
+
+    ASSIGN lr_test->* TO FIELD-SYMBOL(<chk>).
+    DATA(lv_has_biz) = abap_false.
+    DATA(lv_eid_f) = zcl_excel_types=>get_entity_id_field( iv_table_name ).
+    DATA(lo_sdesc) = CAST cl_abap_structdescr(
+      cl_abap_typedescr=>describe_by_data( <chk> ) ).
+
+    LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_comp).
+      IF ls_comp-name = 'MANDT' OR ls_comp-name = 'CLIENT'.
+        CONTINUE.
+      ENDIF.
+      IF ls_comp-name = lv_eid_f.
+        CONTINUE.
+      ENDIF.
+      IF is_admin_timestamp_field( CONV fieldname( ls_comp-name ) ) = abap_true.
+        CONTINUE.
+      ENDIF.
+      IF zcl_excel_types=>is_admin_field( CONV fieldname( ls_comp-name ) ) = abap_true.
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT ls_comp-name OF STRUCTURE <chk> TO FIELD-SYMBOL(<v>).
+      IF sy-subrc = 0 AND <v> IS NOT INITIAL.
+        lv_has_biz = abap_true.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+    IF lv_has_biz = abap_false.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text =
+          |new_data có JSON nhưng không map field nghiệp vụ vào { iv_table_name }. | &&
+          |Kiểm tra ZFLD_CONFIG: tên field phải trùng DDIC (vd COMPANY, không phải COMPANY_CODE).|.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

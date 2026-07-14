@@ -114,7 +114,7 @@ CLASS zcl_repo_inventory IMPLEMENTATION.
  APPEND ls_de TO lt_de.
  ENDLOOP.
 
- rt_json = zcl_json_helper=>serialize( lt_de ).
+ rt_json = zcl_dyn_record_handler=>serialize( lt_de ).
  ENDMETHOD.
 
 
@@ -143,7 +143,7 @@ CLASS zcl_repo_inventory IMPLEMENTATION.
  APPEND ls_sh TO lt_sh.
  ENDLOOP.
 
- rt_json = zcl_json_helper=>serialize( lt_sh ).
+ rt_json = zcl_dyn_record_handler=>serialize( lt_sh ).
  ENDMETHOD.
 
 
@@ -178,7 +178,7 @@ CLASS zcl_repo_inventory IMPLEMENTATION.
 
  SORT lt_fm BY fnarea funcname.
 
- rt_json = zcl_json_helper=>serialize( lt_fm ).
+ rt_json = zcl_dyn_record_handler=>serialize( lt_fm ).
  ENDMETHOD.
 
 
@@ -210,7 +210,7 @@ CLASS zcl_repo_inventory IMPLEMENTATION.
  APPEND ls_cds TO lt_cds.
  ENDLOOP.
 
- rt_json = zcl_json_helper=>serialize( lt_cds ).
+ rt_json = zcl_dyn_record_handler=>serialize( lt_cds ).
  ENDMETHOD.
 
 
@@ -239,7 +239,7 @@ CLASS zcl_repo_inventory IMPLEMENTATION.
  APPEND ls_fk TO lt_fk.
  ENDLOOP.
 
- rt_json = zcl_json_helper=>serialize( lt_fk ).
+ rt_json = zcl_dyn_record_handler=>serialize( lt_fk ).
  ENDMETHOD.
 
 
@@ -311,3 +311,4 @@ CLASS zcl_repo_inventory IMPLEMENTATION.
  ENDMETHOD.
 
 ENDCLASS.
+

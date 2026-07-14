@@ -47,7 +47,7 @@ CLASS zcl_tblconfig_validator IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    IF zcl_ddic_helper=>table_exists( iv_tabname ) = abap_false.
+    IF zcl_table_inspector=>ddic_table_exists( iv_tabname ) = abap_false.
       rs_result-error = |Table { iv_tabname } does not exist|.
       RETURN.
     ENDIF.
@@ -89,3 +89,4 @@ CLASS zcl_tblconfig_validator IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+

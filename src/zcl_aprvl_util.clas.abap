@@ -1,8 +1,8 @@
-CLASS zcl_aprvl_util DEFINITION
-  PUBLIC FINAL CREATE PUBLIC.
 
-  PUBLIC SECTION.
-    TYPES tt_aprvl_history TYPE STANDARD TABLE OF ztbl_aprvl WITH DEFAULT KEY.
+CLASS zcl_aprvl_util DEFINITION
+PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+TYPES tt_aprvl_history TYPE STANDARD TABLE OF ztbl_aprvl WITH DEFAULT KEY.
 
     TYPES:
       BEGIN OF ty_submit_result,
@@ -48,7 +48,7 @@ CLASS zcl_aprvl_util DEFINITION
     CLASS-METHODS assert_no_conflicting_pending
       IMPORTING iv_table_name TYPE ztde_table_name
                 iv_record_key TYPE ztde_record_key
-      RAISING   zcx_pending_exists.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS update_pending_data
       IMPORTING iv_aprvl_id    TYPE sysuuid_c32
@@ -56,12 +56,39 @@ CLASS zcl_aprvl_util DEFINITION
                 iv_new_data    TYPE string OPTIONAL
                 iv_old_data    TYPE string OPTIONAL.
 
+TYPES:
+      BEGIN OF ty_result,
+        needs_approval TYPE abap_bool,
+        aprvl_id       TYPE sysuuid_c32,
+        message        TYPE string,
+      END OF ty_result.
+
+    CLASS-METHODS check_and_submit
+      IMPORTING
+        iv_table_name  TYPE ztde_table_name
+        iv_action_type TYPE ztde_action_type
+        iv_record_key  TYPE ztde_record_key
+        iv_new_data    TYPE string OPTIONAL
+        iv_old_data    TYPE string OPTIONAL
+      RETURNING
+        VALUE(rs_result) TYPE ty_result
+      RAISING
+        zcx_excel_pipeline.
+
+CLASS-METHODS:
+      log_change
+        IMPORTING
+          iv_table_name  TYPE ztde_table_name
+          iv_record_key  TYPE ztde_record_key
+          iv_field_name  TYPE ztde_field_name OPTIONAL
+          iv_old_value   TYPE string OPTIONAL
+          iv_new_value   TYPE string OPTIONAL
+          iv_action_type TYPE ztde_action_type.
 ENDCLASS.
 
 
 CLASS zcl_aprvl_util IMPLEMENTATION.
-
-  METHOD submit_for_approval.
+METHOD submit_for_approval.
     TRY.
         DATA(lv_aprvl_id) = cl_system_uuid=>create_uuid_c32_static( ).
 
@@ -160,7 +187,7 @@ CLASS zcl_aprvl_util IMPLEMENTATION.
 
     IF ls_pending-aprvl_id IS NOT INITIAL
        AND ls_pending-submitted_by <> sy-uname.
-      RAISE EXCEPTION TYPE zcx_pending_exists
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
         EXPORTING
           iv_text         = |Record đang chờ duyệt bởi { ls_pending-submitted_by }. Không thể tạo request mới.|
           iv_submitted_by = ls_pending-submitted_by.
@@ -177,6 +204,69 @@ CLASS zcl_aprvl_util IMPLEMENTATION.
           old_data     = @iv_old_data,
           submitted_at = @lv_now
       WHERE aprvl_id = @iv_aprvl_id.
+  ENDMETHOD.
+
+METHOD check_and_submit.
+    IF zcl_aprvl_util=>is_approval_required( iv_table_name ) = abap_false.
+      rs_result-needs_approval = abap_false.
+      RETURN.
+    ENDIF.
+
+    zcl_aprvl_util=>assert_no_conflicting_pending(
+      iv_table_name = iv_table_name
+      iv_record_key = iv_record_key ).
+
+    DATA(ls_pending) = zcl_aprvl_util=>find_pending_by_record(
+      iv_table_name = iv_table_name
+      iv_record_key = iv_record_key ).
+
+    IF ls_pending-aprvl_id IS NOT INITIAL.
+      zcl_aprvl_util=>update_pending_data(
+        iv_aprvl_id    = ls_pending-aprvl_id
+        iv_action_type = iv_action_type
+        iv_new_data    = iv_new_data
+        iv_old_data    = iv_old_data ).
+
+      rs_result = VALUE #(
+        needs_approval = abap_true
+        aprvl_id       = ls_pending-aprvl_id
+        message        = |Đã cập nhật request đang chờ duyệt ({ ls_pending-aprvl_id })| ).
+      RETURN.
+    ENDIF.
+
+    DATA(ls_submit) = zcl_aprvl_util=>submit_for_approval(
+      iv_table_name  = iv_table_name
+      iv_action_type = iv_action_type
+      iv_record_key  = iv_record_key
+      iv_new_data    = iv_new_data
+      iv_old_data    = iv_old_data ).
+
+    rs_result = VALUE #(
+      needs_approval = ls_submit-success
+      aprvl_id       = ls_submit-aprvl_id
+      message        = ls_submit-message ).
+  ENDMETHOD.
+
+METHOD log_change.
+    TRY.
+        DATA(lv_audit_id) = cl_system_uuid=>create_uuid_c32_static( ).
+
+        INSERT ztbl_audit FROM @(
+          VALUE ztbl_audit(
+            audit_id    = lv_audit_id
+            table_name  = iv_table_name
+            record_key  = iv_record_key
+            field_name  = iv_field_name
+            old_value   = CONV #( iv_old_value )
+            new_value   = CONV #( iv_new_value )
+            changed_by  = sy-uname
+            changed_at  = utclong_current( )
+            action_type = iv_action_type
+          )
+        ).
+
+      CATCH cx_uuid_error.
+    ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.
