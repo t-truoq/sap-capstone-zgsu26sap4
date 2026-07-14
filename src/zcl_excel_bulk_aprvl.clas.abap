@@ -133,7 +133,7 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
         LOOP AT lt_items INTO DATA(ls_item).
           apply_single_item( ls_item ).
 
-          zcl_audit_logger=>log_change(
+          zcl_aprvl_util=>log_change(
             iv_table_name  = ls_item-table_name
             iv_record_key  = ls_item-record_key
             iv_action_type = ls_item-action_type
@@ -210,27 +210,28 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
 
     CASE is_item-action_type.
       WHEN 'C'.
-        zcl_json_helper=>deserialize(
+        zcl_dyn_record_handler=>deserialize(
           EXPORTING iv_json   = is_item-new_data
           CHANGING  ca_record = lo_record ).
 
+        zcl_dyn_record_handler=>on_create(
+          iv_table_name = is_item-table_name
+          ir_record     = lo_record ).
         ASSIGN lo_record->* TO FIELD-SYMBOL(<ls_rec_c>).
-        zcl_excel_record_builder=>apply_admin_on_insert(
-          CHANGING cs_record = <ls_rec_c> ).
         INSERT (is_item-table_name) FROM <ls_rec_c>.
 
       WHEN 'U'.
-        zcl_json_helper=>deserialize(
+        zcl_dyn_record_handler=>deserialize(
           EXPORTING iv_json   = is_item-new_data
           CHANGING  ca_record = lo_record ).
 
         ASSIGN lo_record->* TO FIELD-SYMBOL(<ls_rec_u>).
-        zcl_excel_record_builder=>apply_admin_on_update(
+        zcl_dyn_record_handler=>apply_admin_on_update(
           CHANGING cs_record = <ls_rec_u> ).
         UPDATE (is_item-table_name) FROM <ls_rec_u>.
 
       WHEN 'D'.
-        DATA(lv_fk_error) = zcl_dynamic_table_reader=>check_foreign_key(
+        DATA(lv_fk_error) = zcl_dyn_record_handler=>check_foreign_key(
           iv_table_name = is_item-table_name
           iv_record_key = CONV string( is_item-record_key ) ).
         IF lv_fk_error IS NOT INITIAL.
@@ -238,7 +239,7 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
             EXPORTING iv_text = lv_fk_error.
         ENDIF.
 
-        zcl_json_helper=>deserialize(
+        zcl_dyn_record_handler=>deserialize(
           EXPORTING iv_json   = CONV string( is_item-record_key )
           CHANGING  ca_record = lo_record ).
 
@@ -257,3 +258,4 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+

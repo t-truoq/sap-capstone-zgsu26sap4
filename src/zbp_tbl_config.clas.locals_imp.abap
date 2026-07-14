@@ -225,7 +225,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  zcl_auth_helper=>check_permission(
  iv_table_name = CONV #( ls_config-tablename )
  iv_action     = zcl_auth_helper=>c_action-create ).
- CATCH zcx_04_no_auth INTO DATA(lx_auth_create).
+ CATCH zcx_excel_pipeline INTO DATA(lx_auth_create).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #( table_name = ls_config-tablename success = abap_false message = lx_auth_create->get_text( ) )
@@ -264,23 +264,24 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ASSIGN lo_create->* TO FIELD-SYMBOL(<ls_create>).
 
  TRY.
- zcl_json_helper=>deserialize(
+ zcl_dyn_record_handler=>deserialize(
  EXPORTING iv_json = lv_record_data
  CHANGING ca_record = lo_create
  ).
 
- zcl_record_autofill=>on_create(
+ zcl_dyn_record_handler=>on_create(
  iv_table_name = ls_config-tablename
  ir_record     = lo_create
  ).
 
- DATA(lt_create_keys) = zcl_dynamic_table_reader=>get_key_fields( ls_config-tablename ).
- DATA(lv_create_key) = zcl_record_key_builder=>build_key_json(
+ DATA(lt_create_keys) = zcl_dyn_record_handler=>get_key_fields(
+   iv_table_name = ls_config-tablename ).
+ DATA(lv_create_key) = zcl_dyn_record_handler=>build_key_json(
  it_key_fields = lt_create_keys
  ir_record     = lo_create
  ).
 
- lv_record_data = zcl_json_helper=>serialize( <ls_create> ).
+ lv_record_data = zcl_dyn_record_handler=>serialize( <ls_create> ).
 
  CATCH cx_root INTO DATA(lx_create).
  APPEND VALUE #(
@@ -290,16 +291,16 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDTRY.
 
- DATA ls_aprvl TYPE zcl_approval_guard=>ty_result.
+ DATA ls_aprvl TYPE zcl_aprvl_util=>ty_result.
 
  TRY.
- ls_aprvl = zcl_approval_guard=>check_and_submit(
+ ls_aprvl = zcl_aprvl_util=>check_and_submit(
  iv_table_name  = ls_config-tablename
  iv_action_type = 'C'
  iv_record_key  = CONV #( lv_create_key )
  iv_new_data    = lv_record_data
  ).
- CATCH zcx_pending_exists INTO DATA(lx_pending_create).
+ CATCH zcx_excel_pipeline INTO DATA(lx_pending_create).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #( table_name = ls_config-tablename success = abap_false message = lx_pending_create->get_text( ) )
@@ -342,7 +343,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  zcl_auth_helper=>check_permission(
  iv_table_name = CONV #( ls_config-tablename )
  iv_action     = zcl_auth_helper=>c_action-update ).
- CATCH zcx_04_no_auth INTO DATA(lx_auth_update).
+ CATCH zcx_excel_pipeline INTO DATA(lx_auth_update).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -380,13 +381,14 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CREATE DATA lo_new TYPE HANDLE lo_desc.
  ASSIGN lo_new->* TO FIELD-SYMBOL(<ls_new>).
 
- zcl_json_helper=>deserialize(
+ zcl_dyn_record_handler=>deserialize(
  EXPORTING iv_json = lv_record_data
  CHANGING ca_record = lo_new
  ).
 
- DATA(lt_keys) = zcl_dynamic_table_reader=>get_key_fields( ls_config-tablename ).
- DATA(lv_where) = zcl_record_key_builder=>build_where_clause(
+ DATA(lt_keys) = zcl_dyn_record_handler=>get_key_fields(
+   iv_table_name = ls_config-tablename ).
+ DATA(lv_where) = zcl_dyn_record_handler=>build_where_clause(
  it_key_fields = lt_keys
  ir_record = lo_new
  ).
@@ -400,26 +402,26 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  INTO @<ls_old>.
 
  DATA(lv_old_json) = COND string(
- WHEN sy-subrc = 0 THEN zcl_json_helper=>serialize( <ls_old> )
+ WHEN sy-subrc = 0 THEN zcl_dyn_record_handler=>serialize( <ls_old> )
  ELSE space
  ).
 
- DATA(lv_record_key) = zcl_record_key_builder=>build_key_json(
+ DATA(lv_record_key) = zcl_dyn_record_handler=>build_key_json(
  it_key_fields = lt_keys
  ir_record = lo_new
  ).
 
- DATA ls_aprvl TYPE zcl_approval_guard=>ty_result.
+ DATA ls_aprvl TYPE zcl_aprvl_util=>ty_result.
 
  TRY.
- ls_aprvl = zcl_approval_guard=>check_and_submit(
+ ls_aprvl = zcl_aprvl_util=>check_and_submit(
  iv_table_name = ls_config-tablename
  iv_action_type = 'U'
  iv_record_key = CONV #( lv_record_key )
  iv_new_data = lv_record_data
  iv_old_data = lv_old_json
  ).
- CATCH zcx_pending_exists INTO DATA(lx_pending_update).
+ CATCH zcx_excel_pipeline INTO DATA(lx_pending_update).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -479,7 +481,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  zcl_auth_helper=>check_permission(
  iv_table_name = CONV #( ls_config-tablename )
  iv_action     = zcl_auth_helper=>c_action-delete ).
- CATCH zcx_04_no_auth INTO DATA(lx_auth_delete).
+ CATCH zcx_excel_pipeline INTO DATA(lx_auth_delete).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -517,13 +519,14 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CREATE DATA lo_rec TYPE HANDLE lo_desc.
  ASSIGN lo_rec->* TO FIELD-SYMBOL(<ls_rec>).
 
- zcl_json_helper=>deserialize(
+ zcl_dyn_record_handler=>deserialize(
  EXPORTING iv_json = CONV string( lv_record_key )
  CHANGING ca_record = lo_rec
  ).
 
- DATA(lt_keys) = zcl_dynamic_table_reader=>get_key_fields( ls_config-tablename ).
- DATA(lv_where) = zcl_record_key_builder=>build_where_clause(
+ DATA(lt_keys) = zcl_dyn_record_handler=>get_key_fields(
+   iv_table_name = ls_config-tablename ).
+ DATA(lv_where) = zcl_dyn_record_handler=>build_where_clause(
  it_key_fields = lt_keys
  ir_record = lo_rec
  ).
@@ -537,20 +540,20 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  INTO @<ls_old>.
 
  DATA(lv_old_json) = COND string(
- WHEN sy-subrc = 0 THEN zcl_json_helper=>serialize( <ls_old> )
+ WHEN sy-subrc = 0 THEN zcl_dyn_record_handler=>serialize( <ls_old> )
  ELSE space
  ).
 
- DATA ls_aprvl TYPE zcl_approval_guard=>ty_result.
+ DATA ls_aprvl TYPE zcl_aprvl_util=>ty_result.
 
  TRY.
- ls_aprvl = zcl_approval_guard=>check_and_submit(
+ ls_aprvl = zcl_aprvl_util=>check_and_submit(
  iv_table_name = ls_config-tablename
  iv_action_type = 'D'
  iv_record_key = lv_record_key
  iv_old_data = lv_old_json
  ).
- CATCH zcx_pending_exists INTO DATA(lx_pending_delete).
+ CATCH zcx_excel_pipeline INTO DATA(lx_pending_delete).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -970,14 +973,14 @@ ENDMETHOD.
  ENDIF.
 
  TRY.
- DATA(lo_data) = zcl_dynamic_table_reader=>get_table_data(
+ DATA(lo_data) = zcl_dyn_record_handler=>get_table_data(
  iv_table_name = ls_config-tablename
  iv_max_rows = 100
  ).
 
  ASSIGN lo_data->* TO FIELD-SYMBOL(<lt_data>).
 
- DATA(lv_json) = zcl_json_helper=>serialize( <lt_data> ).
+ DATA(lv_json) = zcl_dyn_record_handler=>serialize( <lt_data> ).
 
  APPEND VALUE #(
  %tky = ls_config-%tky
@@ -1063,7 +1066,7 @@ ENDMETHOD.
  expires_at = ls_lock-expires_at )
  ) TO result.
 
- CATCH zcx_table_locked INTO DATA(lx_lock).
+ CATCH zcx_excel_pipeline INTO DATA(lx_lock).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -1136,7 +1139,7 @@ ENDMETHOD.
  expires_at = ls_lock-expires_at )
  ) TO result.
 
- CATCH zcx_table_locked INTO DATA(lx_lock).
+ CATCH zcx_excel_pipeline INTO DATA(lx_lock).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -1186,7 +1189,7 @@ ENDMETHOD.
  message = |Lock released| )
  ) TO result.
 
- CATCH zcx_table_locked INTO DATA(lx_lock).
+ CATCH zcx_excel_pipeline INTO DATA(lx_lock).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -1223,7 +1226,7 @@ ENDMETHOD.
  message = |Locks force released| )
  ) TO result.
 
- CATCH zcx_04_no_auth INTO DATA(lx_auth).
+ CATCH zcx_excel_pipeline INTO DATA(lx_auth).
  APPEND VALUE #(
  %tky = ls_config-%tky
  %param = VALUE #(
@@ -1328,7 +1331,8 @@ METHOD getfkvalues.
     IF sy-subrc = 0 AND lv_forstring IS NOT INITIAL.
       lv_key_field = lv_forstring.
     ELSE.
-      DATA(lt_pk) = zcl_dynamic_table_reader=>get_key_fields( lv_ref_table ).
+      DATA(lt_pk) = zcl_dyn_record_handler=>get_key_fields(
+        iv_table_name = lv_ref_table ).
       IF lt_pk IS NOT INITIAL.
         lv_key_field = lt_pk[ 1 ].
       ENDIF.
@@ -1361,13 +1365,13 @@ METHOD getfkvalues.
 
     " ── Bước 4: Đọc data từ bảng cha ────────────────────────────────────
     TRY.
-        DATA(lo_data) = zcl_dynamic_table_reader=>get_table_data(
+        DATA(lo_data) = zcl_dyn_record_handler=>get_table_data(
           iv_table_name = lv_ref_table
           iv_max_rows   = 200
         ).
 
         ASSIGN lo_data->* TO FIELD-SYMBOL(<lt_data>).
-        DATA(lv_json) = zcl_json_helper=>serialize( <lt_data> ).
+        DATA(lv_json) = zcl_dyn_record_handler=>serialize( <lt_data> ).
 
         APPEND VALUE #(
           %tky   = ls_key-%tky

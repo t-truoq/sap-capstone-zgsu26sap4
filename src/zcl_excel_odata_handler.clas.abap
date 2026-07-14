@@ -1,13 +1,11 @@
 "! <p class="shorttext synchronized">OData action logic (Phase 5)</p>
 "! Handler mỏng: map CDS ↔ pipeline classes (Phase 1–4). Không phụ thuộc facade.
 CLASS zcl_excel_odata_handler DEFINITION
-  PUBLIC
+PUBLIC
   FINAL
   CREATE PUBLIC.
-
-  PUBLIC SECTION.
-
-    TYPES:
+PUBLIC SECTION.
+TYPES:
       ty_download_req TYPE zdt_excel_download_req,
       ty_download_res TYPE zdt_excel_download_res,
       ty_upload_req   TYPE zdt_excel_upload_req,
@@ -38,9 +36,27 @@ CLASS zcl_excel_odata_handler DEFINITION
       RETURNING VALUE(rt_cds)   TYPE tt_diff_cds
       RAISING   zcx_excel_pipeline.
 
-  PRIVATE SECTION.
+CLASS-METHODS download_excel_base64
+      IMPORTING iv_table_name         TYPE tabname
+                iv_template_only      TYPE abap_bool DEFAULT abap_false
+      RETURNING VALUE(rv_file_base64) TYPE string
+      RAISING   zcx_excel_pipeline.
 
-    CLASS-METHODS diff_from_internal
+    CLASS-METHODS preview_import_base64
+      IMPORTING iv_table_name    TYPE tabname
+                iv_file_base64   TYPE string
+      EXPORTING et_rows          TYPE zcl_excel_types=>tt_parsed_row
+                et_diff          TYPE zcl_excel_types=>tt_diff_row
+                et_messages      TYPE string_table
+      RAISING   zcx_excel_pipeline.
+
+    CLASS-METHODS confirm_import
+      IMPORTING iv_table_name        TYPE tabname
+                it_diff              TYPE zcl_excel_types=>tt_diff_row
+      RETURNING VALUE(rs_summary)    TYPE zcl_excel_types=>ty_summary
+      RAISING   zcx_excel_pipeline.
+PRIVATE SECTION.
+CLASS-METHODS diff_from_internal
       IMPORTING it_diff         TYPE zcl_excel_types=>tt_diff_row
       RETURNING VALUE(rt_cds)    TYPE tt_diff_cds.
 
@@ -50,22 +66,20 @@ CLASS zcl_excel_odata_handler DEFINITION
 
     CLASS-METHODS new_diff_id
       RETURNING VALUE(rv_id) TYPE sysuuid_x16.
-
 ENDCLASS.
 
 
 CLASS zcl_excel_odata_handler IMPLEMENTATION.
-
-  METHOD download_excel.
+METHOD download_excel.
     CLEAR rs_res.
     rs_res-id = is_req-id.
 
     DATA lv_xstring TYPE xstring.
     IF is_req-template_only = abap_true.
-      lv_xstring = zcl_excel_exporter=>export_template(
+      lv_xstring = zcl_excel_importer=>export_template(
         CONV tabname( is_req-table_name ) ).
     ELSE.
-      lv_xstring = zcl_excel_exporter=>export_table(
+      lv_xstring = zcl_excel_importer=>export_table(
         CONV tabname( is_req-table_name ) ).
     ENDIF.
 
@@ -109,7 +123,7 @@ CLASS zcl_excel_odata_handler IMPLEMENTATION.
     DATA(lt_diff) = diff_to_internal( it_diff_cds ).
 
     " Gọi committer trực tiếp (tránh trùng tên method confirm_import với facade/committer)
-    DATA(ls_sum) = zcl_excel_committer=>confirm_import(
+    DATA(ls_sum) = zcl_excel_diff_builder=>confirm_import(
                      iv_table_name = CONV tabname( is_req-table_name )
                      it_diff       = lt_diff
                      iv_do_commit  = abap_false ).
@@ -184,6 +198,45 @@ CLASS zcl_excel_odata_handler IMPLEMENTATION.
             previous = lx
             iv_text  = |Invalid diff_json: { lx->get_text( ) }|.
     ENDTRY.
+  ENDMETHOD.
+
+METHOD download_excel_base64.
+    DATA lv_xstring TYPE xstring.
+
+    IF iv_template_only = abap_true.
+      lv_xstring = zcl_excel_importer=>export_template( iv_table_name ).
+    ELSE.
+      lv_xstring = zcl_excel_importer=>export_table( iv_table_name ).
+    ENDIF.
+
+    rv_file_base64 = cl_http_utility=>encode_x_base64( lv_xstring ).
+  ENDMETHOD.
+
+
+  METHOD preview_import_base64.
+    CLEAR: et_rows, et_diff, et_messages.
+
+    DATA(lv_xstring) = cl_http_utility=>decode_x_base64( iv_file_base64 ).
+
+    zcl_excel_importer=>parse_excel(
+      EXPORTING
+        iv_table_name = iv_table_name
+        iv_file       = lv_xstring
+      IMPORTING
+        et_rows       = et_rows
+        et_messages   = et_messages ).
+
+    et_diff = zcl_excel_diff_builder=>build_diff(
+                iv_table_name = iv_table_name
+                it_rows       = et_rows ).
+  ENDMETHOD.
+
+
+  METHOD confirm_import.
+    rs_summary = zcl_excel_diff_builder=>confirm_import(
+                   iv_table_name = iv_table_name
+                   it_diff       = it_diff
+                   iv_do_commit  = abap_false ).
   ENDMETHOD.
 
 ENDCLASS.

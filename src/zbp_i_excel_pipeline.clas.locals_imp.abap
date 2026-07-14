@@ -79,12 +79,6 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
             EXPORTING is_req  = ls_param
             IMPORTING et_diff = lt_diff
                       ev_info = lv_info ).
-        CATCH zcx_04_no_auth INTO DATA(lx_auth_upload).
-          APPEND VALUE #(
-            id      = cl_system_uuid=>create_uuid_x16_static( )
-            row_no  = 0
-            status  = 'ERROR'
-            message = lx_auth_upload->get_text( ) ) TO lt_diff.
         CATCH zcx_excel_pipeline INTO DATA(lx).
           APPEND VALUE #(
             id      = cl_system_uuid=>create_uuid_x16_static( )
@@ -126,9 +120,6 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
           ls_res = zcl_excel_odata_handler=>run_confirm_import(
             is_req      = ls_param
             it_diff_cds = lt_diff ).
-        CATCH zcx_04_no_auth INTO DATA(lx_auth_confirm).
-          ls_res-id      = ls_param-id.
-          ls_res-message = lx_auth_confirm->get_text( ).
         CATCH zcx_excel_pipeline INTO DATA(lx).
           ls_res-id      = ls_param-id.
           ls_res-message = lx->get_text( ).
