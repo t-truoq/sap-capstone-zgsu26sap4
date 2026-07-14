@@ -132,13 +132,6 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
     TRY.
         LOOP AT lt_items INTO DATA(ls_item).
           apply_single_item( ls_item ).
-
-          zcl_aprvl_util=>log_change(
-            iv_table_name  = ls_item-table_name
-            iv_record_key  = ls_item-record_key
-            iv_action_type = ls_item-action_type
-            iv_old_value   = ls_item-old_data
-            iv_new_value   = ls_item-new_data ).
         ENDLOOP.
 
         DATA(lv_now) = utclong_current( ).
@@ -202,59 +195,34 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
 
 
   METHOD apply_single_item.
-    DATA(lo_desc) = CAST cl_abap_structdescr(
-      cl_abap_typedescr=>describe_by_name( is_item-table_name ) ).
-
-    DATA lo_record TYPE REF TO data.
-    CREATE DATA lo_record TYPE HANDLE lo_desc.
+    DATA ls_result TYPE zcl_dyn_record_handler=>ty_result.
 
     CASE is_item-action_type.
-      WHEN 'C'.
-        zcl_dyn_record_handler=>deserialize(
-          EXPORTING iv_json   = is_item-new_data
-          CHANGING  ca_record = lo_record ).
+      WHEN zcl_excel_types=>c_action-create.
+        ls_result = zcl_dyn_record_handler=>create_record(
+          iv_table_name  = CONV tabname( is_item-table_name )
+          iv_record_data = is_item-new_data ).
 
-        zcl_dyn_record_handler=>on_create(
-          iv_table_name = is_item-table_name
-          ir_record     = lo_record ).
-        ASSIGN lo_record->* TO FIELD-SYMBOL(<ls_rec_c>).
-        INSERT (is_item-table_name) FROM <ls_rec_c>.
+      WHEN zcl_excel_types=>c_action-update.
+        ls_result = zcl_dyn_record_handler=>update_record(
+          iv_table_name  = CONV tabname( is_item-table_name )
+          iv_record_data = is_item-new_data ).
 
-      WHEN 'U'.
-        zcl_dyn_record_handler=>deserialize(
-          EXPORTING iv_json   = is_item-new_data
-          CHANGING  ca_record = lo_record ).
-
-        ASSIGN lo_record->* TO FIELD-SYMBOL(<ls_rec_u>).
-        zcl_dyn_record_handler=>apply_admin_on_update(
-          CHANGING cs_record = <ls_rec_u> ).
-        UPDATE (is_item-table_name) FROM <ls_rec_u>.
-
-      WHEN 'D'.
-        DATA(lv_fk_error) = zcl_dyn_record_handler=>check_foreign_key(
-          iv_table_name = is_item-table_name
-          iv_record_key = CONV string( is_item-record_key ) ).
-        IF lv_fk_error IS NOT INITIAL.
-          RAISE EXCEPTION TYPE zcx_excel_pipeline
-            EXPORTING iv_text = lv_fk_error.
-        ENDIF.
-
-        zcl_dyn_record_handler=>deserialize(
-          EXPORTING iv_json   = CONV string( is_item-record_key )
-          CHANGING  ca_record = lo_record ).
-
-        ASSIGN lo_record->* TO FIELD-SYMBOL(<ls_rec_d>).
-        DELETE (is_item-table_name) FROM <ls_rec_d>.
+      WHEN zcl_excel_types=>c_action-delete.
+        ls_result = zcl_dyn_record_handler=>delete_record(
+          iv_table_name = CONV tabname( is_item-table_name )
+          iv_record_key = is_item-record_key ).
 
       WHEN OTHERS.
         RAISE EXCEPTION TYPE zcx_excel_pipeline
           EXPORTING iv_text = |Unsupported bulk item action { is_item-action_type }.|.
     ENDCASE.
 
-    IF sy-subrc <> 0.
+    IF ls_result-success <> abap_true.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |DB operation failed for item { is_item-item_no } (sy-subrc = { sy-subrc }).|.
+        EXPORTING iv_text = ls_result-message.
     ENDIF.
   ENDMETHOD.
 
 ENDCLASS.
+
