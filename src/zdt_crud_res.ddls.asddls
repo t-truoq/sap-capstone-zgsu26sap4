@@ -5,4 +5,5 @@ define abstract entity ZDT_CRUD_RES
   record_key  : ztde_record_key;
   success     : abap_boolean;
   message     : abap.string;
+  results_json : abap.string;
 }

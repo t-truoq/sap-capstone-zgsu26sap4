@@ -51,6 +51,7 @@ CLASS zcl_excel_types DEFINITION
                  changed   TYPE c LENGTH 10 VALUE 'CHANGED',
                  delete    TYPE c LENGTH 10 VALUE 'DELETE',
                  unchanged TYPE c LENGTH 10 VALUE 'UNCHANGED',
+                 skipped   TYPE c LENGTH 10 VALUE 'SKIPPED',
                  error     TYPE c LENGTH 10 VALUE 'ERROR',
                END OF c_status.
 

@@ -55,27 +55,66 @@ CLASS zcl_excel_aprvl_bridge IMPLEMENTATION.
           DATA lr_rec TYPE REF TO data.
           DATA(lv_record_key) = ls_group-record_key.
 
+          zcl_excel_conflict_guard=>assert_no_pending_conflict(
+            iv_table_name = CONV ztde_table_name( iv_table_name )
+            iv_record_key = CONV ztde_record_key( lv_record_key ) ).
+
           IF ls_group-status = zcl_excel_types=>c_status-delete.
             lv_old_json = zcl_excel_types=>get_cell_value(
               it_cells = ls_group-cells
               iv_field = c_action_field ).
+
+            zcl_excel_conflict_guard=>assert_current_state(
+              iv_table_name  = iv_table_name
+              iv_action_type = lv_action
+              iv_record_key  = CONV ztde_record_key( lv_record_key )
+              iv_old_data    = lv_old_json ).
+
             CLEAR lv_new_json.
           ELSE.
+            IF ls_group-status = zcl_excel_types=>c_status-changed.
+              lv_old_json = zcl_excel_types=>get_cell_value(
+                it_cells = ls_group-cells
+                iv_field = zcl_excel_conflict_guard=>c_snapshot_field ).
+              IF lv_old_json IS INITIAL.
+                lv_old_json = zcl_excel_conflict_guard=>get_current_snapshot(
+                  iv_table_name = iv_table_name
+                  iv_record_key = CONV ztde_record_key( lv_record_key ) ).
+              ENDIF.
+            ENDIF.
+
+            IF ls_group-status = zcl_excel_types=>c_status-new.
+              zcl_excel_conflict_guard=>assert_current_state(
+                iv_table_name  = iv_table_name
+                iv_action_type = lv_action
+                iv_record_key  = CONV ztde_record_key( lv_record_key ) ).
+            ENDIF.
+
             zcl_excel_record_builder=>build_merged_record(
               EXPORTING iv_table_name = iv_table_name
                         it_cells      = ls_group-cells
                         it_fields     = it_fields
                         iv_status     = ls_group-status
                         iv_record_key = lv_record_key
-              IMPORTING ev_old_json   = lv_old_json
+              IMPORTING ev_old_json   = DATA(lv_builder_old_json)
                         ev_new_json   = lv_new_json
                         er_record     = lr_rec ).
+
+            IF lv_old_json IS INITIAL.
+              lv_old_json = lv_builder_old_json.
+            ENDIF.
 
             IF ls_group-status = zcl_excel_types=>c_status-new.
               lv_record_key = zcl_excel_types=>build_record_key_json(
                 iv_table_name = iv_table_name
                 it_fields     = it_fields
                 ir_row        = lr_rec ).
+            ELSEIF ls_group-status = zcl_excel_types=>c_status-changed.
+              zcl_excel_conflict_guard=>assert_current_state(
+                iv_table_name  = iv_table_name
+                iv_action_type = lv_action
+                iv_record_key  = CONV ztde_record_key( lv_record_key )
+                iv_old_data    = lv_old_json ).
             ENDIF.
 
             zcl_excel_record_builder=>validate_approval_json(
@@ -95,14 +134,15 @@ CLASS zcl_excel_aprvl_bridge IMPLEMENTATION.
 
           IF lv_action = zcl_excel_types=>c_action-create.
             cs_summary-inserted_count = cs_summary-inserted_count + 1.
+          ELSEIF lv_action = zcl_excel_types=>c_action-update.
+            cs_summary-updated_count = cs_summary-updated_count + lines( ls_group-cells ).
           ELSE.
             cs_summary-updated_count = cs_summary-updated_count + 1.
           ENDIF.
 
         CATCH zcx_excel_pipeline INTO DATA(lx_pipe).
-          cs_summary-error_count = cs_summary-error_count + 1.
           cs_summary-skipped_count = cs_summary-skipped_count + 1.
-          APPEND |Row { ls_group-row_no } submit approval failed: { lx_pipe->get_text( ) }| TO cs_summary-messages.
+          APPEND |Row { ls_group-row_no } skipped: { lx_pipe->get_text( ) }| TO cs_summary-messages.
         CATCH cx_root INTO DATA(lx).
           cs_summary-error_count = cs_summary-error_count + 1.
           cs_summary-skipped_count = cs_summary-skipped_count + 1.
