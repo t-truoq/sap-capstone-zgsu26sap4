@@ -344,6 +344,10 @@ CLASS zcl_excel_diff_builder IMPLEMENTATION.
       ENDIF.
 
     ENDLOOP.
+
+    zcl_excel_conflict_guard=>mark_preview_conflicts(
+      EXPORTING iv_table_name = iv_table_name
+      CHANGING  ct_diff       = rt_diff ).
   ENDMETHOD.
 
 

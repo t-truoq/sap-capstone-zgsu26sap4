@@ -31,6 +31,12 @@
      <DOMVALUE_L>D</DOMVALUE_L>
      <DDTEXT>Delete</DDTEXT>
     </DD07V>
+    <DD07V>
+     <VALPOS>0004</VALPOS>
+     <DDLANGUAGE>E</DDLANGUAGE>
+     <DOMVALUE_L>R</DOMVALUE_L>
+     <DDTEXT>Rollback</DDTEXT>
+    </DD07V>
    </DD07V_TAB>
   </asx:values>
  </asx:abap>
