@@ -75,6 +75,8 @@ CLASS zcl_excel_committer IMPLEMENTATION.
       CASE ls_diff0-status.
         WHEN zcl_excel_types=>c_status-unchanged.
           rs_summary-unchanged_count = rs_summary-unchanged_count + 1.
+        WHEN zcl_excel_types=>c_status-skipped.
+          rs_summary-skipped_count = rs_summary-skipped_count + 1.
         WHEN zcl_excel_types=>c_status-error.
           rs_summary-error_count = rs_summary-error_count + 1.
           rs_summary-skipped_count = rs_summary-skipped_count + 1.
@@ -84,6 +86,12 @@ CLASS zcl_excel_committer IMPLEMENTATION.
     " 2) Gom NEW/CHANGED/DELETE thành group theo record_key
     DATA lt_groups TYPE tt_group.
     DATA(lt_fields) = zcl_table_inspector=>get_field_list( iv_table_name ).
+    DATA lt_error_groups TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
+
+    LOOP AT it_diff INTO DATA(ls_error_diff)
+      WHERE status = zcl_excel_types=>c_status-error.
+      INSERT |{ ls_error_diff-row_no }#{ ls_error_diff-record_key }| INTO TABLE lt_error_groups.
+    ENDLOOP.
 
     LOOP AT it_diff INTO DATA(ls_diff)
       WHERE ( status = zcl_excel_types=>c_status-new
@@ -91,7 +99,14 @@ CLASS zcl_excel_committer IMPLEMENTATION.
            OR status = zcl_excel_types=>c_status-delete )
         AND fieldname IS NOT INITIAL.
 
-      IF ls_diff-status <> zcl_excel_types=>c_status-delete.
+      READ TABLE lt_error_groups TRANSPORTING NO FIELDS
+        WITH TABLE KEY table_line = |{ ls_diff-row_no }#{ ls_diff-record_key }|.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+
+      IF ls_diff-status <> zcl_excel_types=>c_status-delete
+         AND ls_diff-fieldname <> zcl_excel_conflict_guard=>c_snapshot_field.
         READ TABLE lt_fields INTO DATA(ls_f_commit) WITH KEY field_name = ls_diff-fieldname.
         IF sy-subrc = 0 AND zcl_excel_types=>is_importable_field_for_table(
           is_field      = ls_f_commit
@@ -124,6 +139,7 @@ CLASS zcl_excel_committer IMPLEMENTATION.
         fieldname = ls_diff-fieldname
         value     = COND string(
           WHEN ls_diff-status = zcl_excel_types=>c_status-delete
+            OR ls_diff-fieldname = zcl_excel_conflict_guard=>c_snapshot_field
           THEN ls_diff-old_value
           ELSE ls_diff-new_value ) ) TO <g>-cells.
     ENDLOOP.

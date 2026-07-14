@@ -257,4 +257,3 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
-
