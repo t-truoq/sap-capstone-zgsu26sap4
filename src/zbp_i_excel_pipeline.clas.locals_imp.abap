@@ -49,6 +49,15 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
       DATA(ls_res) = VALUE zcl_excel_odata_handler=>ty_download_res( ).
 
       TRY.
+          DATA(lv_action) = COND char20(
+            WHEN ls_param-template_only = abap_true
+            THEN zcl_auth_helper=>c_action-upload
+            ELSE zcl_auth_helper=>c_action-view ).
+
+          zcl_auth_helper=>check_permission(
+            iv_table_name = CONV #( ls_param-table_name )
+            iv_action     = lv_action ).
+
           ls_res = zcl_excel_odata_handler=>download_excel( ls_param ).
         CATCH zcx_excel_pipeline INTO DATA(lx).
           ls_res-id      = ls_param-id.

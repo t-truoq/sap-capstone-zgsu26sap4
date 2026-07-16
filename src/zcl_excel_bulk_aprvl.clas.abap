@@ -55,14 +55,44 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
 
   METHOD submit_bulk.
     IF it_items IS INITIAL.
-      rs_result = VALUE #( success = abap_false message = 'No Excel rows to submit for approval.' ).
+      rs_result = VALUE #( success = abap_false message = 'No records to submit for approval.' ).
+      RETURN.
+    ENDIF.
+
+    DATA lt_seen TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
+    DATA lt_valid_items TYPE tt_item.
+    DATA(lv_skipped_count) = 0.
+    DATA(lv_skip_message) = VALUE string( ).
+
+    LOOP AT it_items INTO DATA(ls_check_item).
+      DATA(lv_lock_key) = |{ ls_check_item-table_name }#{ ls_check_item-record_key }|.
+      INSERT lv_lock_key INTO TABLE lt_seen.
+      IF sy-subrc <> 0.
+        lv_skipped_count = lv_skipped_count + 1.
+        lv_skip_message = |{ lv_skip_message } Skipped item { ls_check_item-item_no }: duplicate record { ls_check_item-record_key }.|.
+        CONTINUE.
+      ENDIF.
+
+      TRY.
+          zcl_aprvl_util=>assert_no_conflicting_pending(
+            iv_table_name = ls_check_item-table_name
+            iv_record_key = ls_check_item-record_key ).
+          APPEND ls_check_item TO lt_valid_items.
+        CATCH zcx_excel_pipeline INTO DATA(lx_pending).
+          lv_skipped_count = lv_skipped_count + 1.
+          lv_skip_message = |{ lv_skip_message } Skipped item { ls_check_item-item_no }: { lx_pending->get_text( ) }|.
+      ENDTRY.
+    ENDLOOP.
+
+    IF lt_valid_items IS INITIAL.
+      rs_result = VALUE #( success = abap_false message = lv_skip_message ).
       RETURN.
     ENDIF.
 
     TRY.
         DATA(lv_aprvl_id) = cl_system_uuid=>create_uuid_c32_static( ).
         DATA(lv_now) = utclong_current( ).
-        READ TABLE it_items INTO DATA(ls_first_item) INDEX 1.
+        READ TABLE lt_valid_items INTO DATA(ls_first_item) INDEX 1.
 
         INSERT ztbl_aprvl FROM @(
           VALUE ztbl_aprvl(
@@ -71,13 +101,13 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
             record_key   = 'BULK'
             action_type  = ls_first_item-action_type
             status       = 'PENDING'
-            new_data     = |Excel bulk approval: { lines( it_items ) } item(s)|
+            new_data     = |Bulk approval: { lines( lt_valid_items ) } item(s)|
             old_data     = ''
             submitted_by = sy-uname
             submitted_at = lv_now ) ).
 
         DATA lt_db_items TYPE STANDARD TABLE OF ztbl_aprvl_item.
-        LOOP AT it_items INTO DATA(ls_item).
+        LOOP AT lt_valid_items INTO DATA(ls_item).
           APPEND VALUE ztbl_aprvl_item(
             aprvl_id    = lv_aprvl_id
             item_no     = ls_item-item_no
@@ -86,7 +116,8 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
             action_type = ls_item-action_type
             status      = 'PENDING'
             new_data    = ls_item-new_data
-            old_data    = ls_item-old_data ) TO lt_db_items.
+            old_data    = ls_item-old_data
+            message     = |Item { ls_item-item_no } submitted| ) TO lt_db_items.
         ENDLOOP.
 
         INSERT ztbl_aprvl_item FROM TABLE @lt_db_items.
@@ -95,7 +126,11 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
           success    = abap_true
           aprvl_id   = lv_aprvl_id
           item_count = lines( lt_db_items )
-          message    = |Excel bulk request submitted for approval (ID: { lv_aprvl_id }, items: { lines( lt_db_items ) })| ).
+          message    = |Bulk request submitted for approval (ID: { lv_aprvl_id }, items: { lines( lt_db_items ) })| ).
+
+        IF lv_skipped_count > 0.
+          rs_result-message = |{ rs_result-message } { lv_skipped_count } item(s) skipped.{ lv_skip_message }|.
+        ENDIF.
 
       CATCH cx_root INTO DATA(lx).
         rs_result = VALUE #( success = abap_false message = lx->get_text( ) ).

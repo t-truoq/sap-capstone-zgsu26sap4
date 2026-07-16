@@ -106,6 +106,33 @@ METHOD submit_for_approval.
           )
         ).
 
+        IF sy-subrc <> 0.
+          rs_result = VALUE #(
+            success = abap_false
+            message = |Cannot create approval request for { iv_record_key }| ).
+          RETURN.
+        ENDIF.
+
+        INSERT ztbl_aprvl_item FROM @(
+          VALUE ztbl_aprvl_item(
+            aprvl_id    = lv_aprvl_id
+            item_no     = '000001'
+            table_name  = iv_table_name
+            record_key  = iv_record_key
+            action_type = iv_action_type
+            status      = 'PENDING'
+            new_data    = iv_new_data
+            old_data    = iv_old_data
+            message     = 'Submitted from CRUD' ) ).
+
+        IF sy-subrc <> 0.
+          DELETE FROM ztbl_aprvl WHERE aprvl_id = @lv_aprvl_id.
+          rs_result = VALUE #(
+            success = abap_false
+            message = |Cannot create approval item for { iv_record_key }| ).
+          RETURN.
+        ENDIF.
+
         rs_result = VALUE #(
           success  = abap_true
           aprvl_id = lv_aprvl_id
@@ -177,6 +204,23 @@ METHOD submit_for_approval.
       UP TO 1 ROWS.
       EXIT.
     ENDSELECT.
+
+    IF rs_pending-aprvl_id IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    SELECT aprvl~* FROM ztbl_aprvl AS aprvl
+      INNER JOIN ztbl_aprvl_item AS item
+        ON aprvl~aprvl_id = item~aprvl_id
+      WHERE item~table_name = @iv_table_name
+        AND item~record_key = @iv_record_key
+        AND aprvl~status    = 'PENDING'
+        AND item~status     = 'PENDING'
+      ORDER BY aprvl~submitted_at DESCENDING
+      INTO @rs_pending
+      UP TO 1 ROWS.
+      EXIT.
+    ENDSELECT.
   ENDMETHOD.
 
 
@@ -185,8 +229,7 @@ METHOD submit_for_approval.
       iv_table_name = iv_table_name
       iv_record_key = iv_record_key ).
 
-    IF ls_pending-aprvl_id IS NOT INITIAL
-       AND ls_pending-submitted_by <> sy-uname.
+    IF ls_pending-aprvl_id IS NOT INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
         EXPORTING
           iv_text         = |Record đang chờ duyệt bởi { ls_pending-submitted_by }. Không thể tạo request mới.|
@@ -204,6 +247,25 @@ METHOD submit_for_approval.
           old_data     = @iv_old_data,
           submitted_at = @lv_now
       WHERE aprvl_id = @iv_aprvl_id.
+
+    SELECT SINGLE table_name, record_key
+      FROM ztbl_aprvl
+      WHERE aprvl_id = @iv_aprvl_id
+      INTO @DATA(ls_parent).
+
+    IF sy-subrc = 0.
+      MODIFY ztbl_aprvl_item FROM @(
+        VALUE ztbl_aprvl_item(
+          aprvl_id    = iv_aprvl_id
+          item_no     = '000001'
+          table_name  = ls_parent-table_name
+          record_key  = ls_parent-record_key
+          action_type = iv_action_type
+          status      = 'PENDING'
+          new_data    = iv_new_data
+          old_data    = iv_old_data
+          message     = 'Updated from CRUD' ) ).
+    ENDIF.
   ENDMETHOD.
 
 METHOD check_and_submit.
@@ -270,3 +332,4 @@ METHOD log_change.
   ENDMETHOD.
 
 ENDCLASS.
+

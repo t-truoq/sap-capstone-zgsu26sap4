@@ -238,6 +238,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  IF sy-subrc <> 0. CONTINUE. ENDIF.
 
  DATA(lv_record_data) = ls_key-%param-record_data.
+ IF lv_record_data IS INITIAL.
+ lv_record_data = ls_key-%param-records_data.
+ ENDIF.
 
  IF lv_record_data IS INITIAL.
  APPEND VALUE #(
@@ -360,6 +363,11 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  IF sy-subrc <> 0. CONTINUE. ENDIF.
 
  DATA(lv_record_data) = ls_key-%param-record_data.
+ IF lv_record_data IS INITIAL.
+ lv_record_data = ls_key-%param-records_data.
+ ENDIF.
+ DATA(lv_payload) = lv_record_data.
+ SHIFT lv_payload LEFT DELETING LEADING space.
 
  TRY.
  DATA(lo_desc) = CAST cl_abap_structdescr(
@@ -376,6 +384,168 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ) TO result.
  CONTINUE.
  ENDTRY.
+
+ IF lv_payload CP '[*'.
+ TRY.
+ DATA(lo_batch_table_desc) = cl_abap_tabledescr=>create(
+ p_line_type = lo_desc ).
+ DATA lr_batch_records TYPE REF TO data.
+ CREATE DATA lr_batch_records TYPE HANDLE lo_batch_table_desc.
+
+ zcl_dyn_record_handler=>deserialize(
+ EXPORTING iv_json = lv_record_data
+ CHANGING ca_record = lr_batch_records ).
+
+ FIELD-SYMBOLS <lt_batch_records> TYPE STANDARD TABLE.
+ ASSIGN lr_batch_records->* TO <lt_batch_records>.
+ IF <lt_batch_records> IS NOT ASSIGNED OR <lt_batch_records> IS INITIAL.
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = 'Records data is empty or invalid'
+ )
+ ) TO result.
+ CONTINUE.
+ ENDIF.
+
+ DATA lt_batch_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA lr_batch_record TYPE REF TO data.
+ LOOP AT <lt_batch_records> ASSIGNING FIELD-SYMBOL(<ls_batch_record>).
+ DATA(lv_batch_item_no) = sy-tabix.
+ GET REFERENCE OF <ls_batch_record> INTO lr_batch_record.
+
+ DATA(lt_batch_keys) = zcl_dyn_record_handler=>get_key_fields(
+ iv_table_name = ls_config-tablename ).
+ DATA(lv_batch_where) = zcl_dyn_record_handler=>build_where_clause(
+ it_key_fields = lt_batch_keys
+ ir_record = lr_batch_record ).
+ DATA(lv_batch_key) = zcl_dyn_record_handler=>build_key_json(
+ it_key_fields = lt_batch_keys
+ ir_record = lr_batch_record ).
+
+ IF lv_batch_where IS INITIAL OR lv_batch_key IS INITIAL.
+ RAISE EXCEPTION TYPE zcx_excel_pipeline
+ EXPORTING iv_text = |Cannot build key for CRUD row { lv_batch_item_no }|.
+ ENDIF.
+
+ DATA(lr_batch_old) = zcl_dyn_record_handler=>get_single_record(
+ iv_table_name = ls_config-tablename
+ iv_where = lv_batch_where ).
+ ASSIGN lr_batch_old->* TO FIELD-SYMBOL(<ls_batch_old>).
+
+ APPEND VALUE #(
+ item_no = lv_batch_item_no
+ table_name = ls_config-tablename
+ record_key = CONV #( lv_batch_key )
+ action_type = 'U'
+ new_data = zcl_dyn_record_handler=>serialize( <ls_batch_record> )
+ old_data = zcl_dyn_record_handler=>serialize( <ls_batch_old> )
+ ) TO lt_batch_items.
+ ENDLOOP.
+
+ DATA ls_batch_item TYPE zcl_excel_bulk_aprvl=>ty_item.
+ IF zcl_aprvl_util=>is_approval_required( ls_config-tablename ) = abap_true.
+ DATA lt_batch_submit_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA(lv_batch_skipped) = 0.
+ DATA(lv_batch_skip_msg) = VALUE string( ).
+
+ LOOP AT lt_batch_items INTO ls_batch_item.
+ TRY.
+ zcl_aprvl_util=>assert_no_conflicting_pending(
+ iv_table_name = ls_batch_item-table_name
+ iv_record_key = ls_batch_item-record_key ).
+ APPEND ls_batch_item TO lt_batch_submit_items.
+ CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
+ lv_batch_skipped = lv_batch_skipped + 1.
+ IF lv_batch_skip_msg IS INITIAL.
+ lv_batch_skip_msg = |Skipped row { ls_batch_item-item_no }: { lx_batch_pending->get_text( ) }|.
+ ELSE.
+ lv_batch_skip_msg = |{ lv_batch_skip_msg } Skipped row { ls_batch_item-item_no }: { lx_batch_pending->get_text( ) }|.
+ ENDIF.
+ ENDTRY.
+ ENDLOOP.
+
+ IF lt_batch_submit_items IS INITIAL.
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = lv_batch_skip_msg
+ )
+ ) TO result.
+ CONTINUE.
+ ENDIF.
+
+ DATA(ls_batch_submit) = zcl_excel_bulk_aprvl=>submit_bulk(
+ iv_table_name = CONV #( ls_config-tablename )
+ it_items = lt_batch_submit_items ).
+
+ IF lv_batch_skipped > 0.
+ ls_batch_submit-message = |{ ls_batch_submit-message } { lv_batch_skipped } row(s) skipped. { lv_batch_skip_msg }|.
+ ENDIF.
+
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = ls_batch_submit-success
+ message = ls_batch_submit-message
+ )
+ ) TO result.
+ ELSE.
+ DATA(lv_batch_success) = abap_true.
+ DATA(lv_batch_message) = VALUE string( ).
+ LOOP AT lt_batch_items INTO ls_batch_item.
+ DATA(ls_batch_update) = zcl_dyn_record_handler=>update_record(
+ iv_table_name = ls_config-tablename
+ iv_record_data = ls_batch_item-new_data ).
+ IF ls_batch_update-success <> abap_true.
+ lv_batch_success = abap_false.
+ lv_batch_message = |{ lv_batch_message } Item { ls_batch_item-item_no }: { ls_batch_update-message }|.
+ ENDIF.
+ ENDLOOP.
+
+ IF lv_batch_success = abap_true.
+ lv_batch_message = |Updated { lines( lt_batch_items ) } record(s) successfully|.
+ ENDIF.
+
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = lv_batch_success
+ message = lv_batch_message
+ )
+ ) TO result.
+ ENDIF.
+
+ CATCH cx_root INTO DATA(lx_batch_update).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = lx_batch_update->get_text( )
+ )
+ ) TO result.
+ ENDTRY.
+ CONTINUE.
+ ENDIF.
+
+ IF lv_record_data IS INITIAL.
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ success = abap_false
+ message = 'Record data is empty'
+ )
+ ) TO result.
+ CONTINUE.
+ ENDIF.
 
  DATA lo_new TYPE REF TO data.
  CREATE DATA lo_new TYPE HANDLE lo_desc.
@@ -931,6 +1101,21 @@ ENDMETHOD.
 
  LOOP AT lt_config INTO DATA(ls_config).
  IF ls_config-tablename IS INITIAL. CONTINUE. ENDIF.
+
+ TRY.
+ zcl_auth_helper=>check_permission(
+ iv_table_name = CONV #( ls_config-tablename )
+ iv_action     = zcl_auth_helper=>c_action-view ).
+ CATCH zcx_excel_pipeline INTO DATA(lx_auth_view).
+ APPEND VALUE #(
+ %tky = ls_config-%tky
+ %param = VALUE #(
+ table_name = ls_config-tablename
+ error_msg = lx_auth_view->get_text( )
+ )
+ ) TO result.
+ CONTINUE.
+ ENDTRY.
 
  IF zcl_table_inspector=>table_exists( ls_config-tablename ) = abap_false.
  APPEND VALUE #(

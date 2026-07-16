@@ -18,6 +18,8 @@ etag master ChangedAt
   field ( readonly ) ChangedAt;
   field ( readonly ) ActionType;
 
+  action rollback result [1] ZDT_CRUD_RESULT;
+
   mapping for ztbl_audit corresponding
   {
     AuditId    = audit_id;

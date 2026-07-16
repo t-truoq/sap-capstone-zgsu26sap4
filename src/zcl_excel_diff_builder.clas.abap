@@ -706,20 +706,17 @@ METHOD confirm_import.
               INSERT (iv_table_name) FROM @<wa_new>.
               rs_summary-inserted_count = rs_summary-inserted_count + 1.
 
-              LOOP AT ls_group-cells INTO DATA(ls_cell_new).
-                READ TABLE lt_fields INTO DATA(ls_f_new) WITH KEY field_name = ls_cell_new-fieldname.
-                IF sy-subrc <> 0 OR zcl_excel_types=>is_diff_comparable_field(
-                  is_field = ls_f_new iv_table_name = iv_table_name it_fields = lt_fields ) = abap_false.
-                  CONTINUE.
-                ENDIF.
-                zcl_aprvl_util=>log_change(
-                  iv_table_name  = CONV ztde_table_name( iv_table_name )
-                  iv_record_key  = CONV ztde_record_key( ls_group-record_key )
-                  iv_field_name  = CONV ztde_field_name( ls_cell_new-fieldname )
-                  iv_old_value   = ''
-                  iv_new_value   = ls_cell_new-value
-                  iv_action_type = zcl_excel_types=>c_action-create ).
-              ENDLOOP.
+              DATA(lv_new_full_json) = zcl_dyn_record_handler=>serialize( <wa_new> ).
+              DATA(lv_new_key_json) = zcl_excel_types=>build_record_key_json(
+                iv_table_name = iv_table_name
+                it_fields     = lt_fields
+                ir_row        = lr_new_rec ).
+              zcl_aprvl_util=>log_change(
+                iv_table_name  = CONV ztde_table_name( iv_table_name )
+                iv_record_key  = CONV ztde_record_key( lv_new_key_json )
+                iv_old_value   = ''
+                iv_new_value   = lv_new_full_json
+                iv_action_type = zcl_excel_types=>c_action-create ).
 
             WHEN zcl_excel_types=>c_status-changed.
               DATA(lv_where) = zcl_excel_types=>build_where_from_record_key(
@@ -784,32 +781,32 @@ METHOD confirm_import.
                 EXPORTING iv_table_name = iv_table_name
                 CHANGING  cv_set        = lv_set ).
 
+              DATA(lv_update_old_json) = VALUE string( ).
+              DATA(lv_update_new_json) = VALUE string( ).
+              DATA lr_update_rec TYPE REF TO data.
+              zcl_excel_types=>build_merged_record(
+                EXPORTING iv_table_name = iv_table_name
+                          it_cells      = ls_group-cells
+                          it_fields     = lt_fields
+                          iv_status     = ls_group-status
+                          iv_record_key = ls_group-record_key
+                IMPORTING ev_old_json   = lv_update_old_json
+                          ev_new_json   = lv_update_new_json
+                          er_record     = lr_update_rec ).
+              ASSIGN lr_update_rec->* TO FIELD-SYMBOL(<wa_update_new>).
+              lv_update_new_json = zcl_dyn_record_handler=>serialize( <wa_update_new> ).
+
               UPDATE (iv_table_name)
                 SET (lv_set)
                 WHERE (lv_where).
               rs_summary-updated_count = rs_summary-updated_count + 1.
 
-              LOOP AT ls_group-cells INTO ls_cell_chg.
-                IF lv_eid_where = abap_false.
-                  READ TABLE lt_keys TRANSPORTING NO FIELDS
-                    WITH KEY table_line = CONV string( ls_cell_chg-fieldname ).
-                  IF sy-subrc = 0.
-                    CONTINUE.
-                  ENDIF.
-                ENDIF.
-                READ TABLE lt_fields INTO DATA(ls_f_aud) WITH KEY field_name = ls_cell_chg-fieldname.
-                IF sy-subrc <> 0 OR zcl_excel_types=>is_diff_comparable_field(
-                  is_field = ls_f_aud iv_table_name = iv_table_name it_fields = lt_fields ) = abap_false.
-                  CONTINUE.
-                ENDIF.
-                zcl_aprvl_util=>log_change(
-                  iv_table_name  = CONV ztde_table_name( iv_table_name )
-                  iv_record_key  = CONV ztde_record_key( ls_group-record_key )
-                  iv_field_name  = CONV ztde_field_name( ls_cell_chg-fieldname )
-                  iv_old_value   = ''
-                  iv_new_value   = ls_cell_chg-value
-                  iv_action_type = zcl_excel_types=>c_action-update ).
-              ENDLOOP.
+              zcl_aprvl_util=>log_change(
+                iv_table_name  = CONV ztde_table_name( iv_table_name )
+                iv_record_key  = CONV ztde_record_key( ls_group-record_key )
+                iv_old_value   = lv_update_old_json
+                iv_new_value   = lv_update_new_json
+                iv_action_type = zcl_excel_types=>c_action-update ).
 
             WHEN zcl_excel_types=>c_status-delete.
               DATA(lv_where_del) = zcl_excel_types=>build_where_from_record_key(
@@ -1055,7 +1052,6 @@ METHOD confirm_import.
 
   METHOD mark_preview_conflicts.
     DATA lt_seen TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
-    DATA lt_extra TYPE zcl_excel_types=>tt_diff_row.
 
     LOOP AT ct_diff INTO DATA(ls_diff)
       WHERE status = zcl_excel_types=>c_status-new
@@ -1071,30 +1067,18 @@ METHOD confirm_import.
           assert_no_pending_conflict(
             iv_table_name = CONV ztde_table_name( iv_table_name )
             iv_record_key = CONV ztde_record_key( ls_diff-record_key ) ).
-
-          IF ls_diff-status = zcl_excel_types=>c_status-changed.
-            DATA(lv_snapshot) = get_current_snapshot(
-              iv_table_name = iv_table_name
-              iv_record_key = CONV ztde_record_key( ls_diff-record_key ) ).
-            APPEND VALUE #(
-              row_no     = ls_diff-row_no
-              table_name = iv_table_name
-              record_key = ls_diff-record_key
-              fieldname  = c_snapshot_field
-              old_value  = lv_snapshot
-              status     = zcl_excel_types=>c_status-changed ) TO lt_extra.
-          ENDIF.
         CATCH zcx_excel_pipeline INTO DATA(lx_conflict).
-          APPEND VALUE #(
-            row_no     = ls_diff-row_no
-            table_name = iv_table_name
-            record_key = ls_diff-record_key
-            status     = zcl_excel_types=>c_status-error
-            message    = lx_conflict->get_text( ) ) TO lt_extra.
+          LOOP AT ct_diff ASSIGNING FIELD-SYMBOL(<conflict_diff>)
+            WHERE row_no     = ls_diff-row_no
+              AND record_key = ls_diff-record_key
+              AND ( status = zcl_excel_types=>c_status-new
+                 OR status = zcl_excel_types=>c_status-changed
+                 OR status = zcl_excel_types=>c_status-delete ).
+            <conflict_diff>-status  = zcl_excel_types=>c_status-skipped.
+            <conflict_diff>-message = lx_conflict->get_text( ).
+          ENDLOOP.
       ENDTRY.
     ENDLOOP.
-
-    APPEND LINES OF lt_extra TO ct_diff.
   ENDMETHOD.
 
   METHOD assert_no_pending_conflict.
@@ -1152,4 +1136,5 @@ METHOD confirm_import.
   ENDMETHOD.
 
 ENDCLASS.
+
 

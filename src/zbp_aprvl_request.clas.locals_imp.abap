@@ -19,11 +19,11 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_data).
 
-    LOOP AT lt_data INTO DATA(ls).
+    LOOP AT lt_data INTO DATA(ls_data).
       APPEND VALUE #(
-        %tky            = ls-%tky
-        %action-approve = zcl_auth_helper=>get_auth_by_status( ls-status )
-        %action-reject  = zcl_auth_helper=>get_auth_by_status( ls-status )
+        %tky            = ls_data-%tky
+        %action-approve = zcl_auth_helper=>get_auth_by_status( ls_data-status )
+        %action-reject  = zcl_auth_helper=>get_auth_by_status( ls_data-status )
       ) TO result.
     ENDLOOP.
   ENDMETHOD.
@@ -35,96 +35,72 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_requests).
 
-    LOOP AT lt_requests INTO DATA(ls_req).
-
-      IF ls_req-status <> 'PENDING'.
+    LOOP AT lt_requests INTO DATA(ls_request).
+      IF ls_request-status <> 'PENDING'.
         APPEND VALUE #(
-          %tky   = ls_req-%tky
+          %tky = ls_request-%tky
           %param = VALUE #(
             success = abap_false
-            message = |Request { ls_req-aprvlid } is not in PENDING status|
-          )
+            message = |Request { ls_request-aprvlid } is not in PENDING status| )
         ) TO result.
         CONTINUE.
       ENDIF.
 
-      IF ls_req-recordkey = 'BULK'.
-        DATA(ls_bulk_result) = zcl_excel_bulk_aprvl=>approve_bulk( ls_req-aprvlid ).
+      IF ls_request-recordkey = 'BULK'.
+        DATA(ls_bulk_result) = zcl_excel_bulk_aprvl=>approve_bulk(
+          iv_aprvl_id = ls_request-aprvlid ).
 
         APPEND VALUE #(
-          %tky   = ls_req-%tky
+          %tky = ls_request-%tky
           %param = VALUE #(
             success = ls_bulk_result-success
-            message = ls_bulk_result-message
-          )
+            message = ls_bulk_result-message )
         ) TO result.
-
         CONTINUE.
       ENDIF.
 
-      TRY.
-          DATA ls_apply_result TYPE zcl_dyn_record_handler=>ty_result.
+      DATA ls_apply_result TYPE zcl_dyn_record_handler=>ty_result.
 
-          CASE ls_req-actiontype.
-            WHEN 'C'.
-              ls_apply_result = zcl_dyn_record_handler=>create_record(
-                iv_table_name  = ls_req-tablename
-                iv_record_data = ls_req-newdata
-              ).
+      CASE ls_request-actiontype.
+        WHEN zcl_excel_types=>c_action-create.
+          ls_apply_result = zcl_dyn_record_handler=>create_record(
+            iv_table_name = CONV tabname( ls_request-tablename )
+            iv_record_data = ls_request-newdata ).
 
-            WHEN 'U'.
-              ls_apply_result = zcl_dyn_record_handler=>update_record(
-                iv_table_name  = ls_req-tablename
-                iv_record_data = ls_req-newdata
-              ).
+        WHEN zcl_excel_types=>c_action-update.
+          ls_apply_result = zcl_dyn_record_handler=>update_record(
+            iv_table_name = CONV tabname( ls_request-tablename )
+            iv_record_data = ls_request-newdata ).
 
-            WHEN 'D'.
-              ls_apply_result = zcl_dyn_record_handler=>delete_record(
-                iv_table_name = ls_req-tablename
-                iv_record_key = ls_req-recordkey
-              ).
+        WHEN zcl_excel_types=>c_action-delete.
+          ls_apply_result = zcl_dyn_record_handler=>delete_record(
+            iv_table_name = CONV tabname( ls_request-tablename )
+            iv_record_key = ls_request-recordkey ).
 
-            WHEN OTHERS.
-              ls_apply_result = VALUE #(
-                success = abap_false
-                message = |Unsupported action type { ls_req-actiontype }|
-              ).
-          ENDCASE.
+        WHEN OTHERS.
+          ls_apply_result = VALUE #(
+            success = abap_false
+            message = |Unsupported approval action { ls_request-actiontype }| ).
+      ENDCASE.
 
-          IF ls_apply_result-success = abap_true.
-            zcl_aprvl_util=>update_status(
-              iv_aprvl_id = ls_req-aprvlid
-              iv_status   = 'APPROVED'
-            ).
+      IF ls_apply_result-success = abap_true.
+        zcl_aprvl_util=>update_status(
+          iv_aprvl_id = ls_request-aprvlid
+          iv_status = 'APPROVED' ).
 
-            APPEND VALUE #(
-              %tky   = ls_req-%tky
-              %param = VALUE #(
-                success = abap_true
-                message = 'Approved and applied successfully'
-              )
-            ) TO result.
+        UPDATE ztbl_aprvl_item
+          SET status = 'APPROVED',
+              message = @ls_apply_result-message
+          WHERE aprvl_id = @ls_request-aprvlid
+            AND status = 'PENDING'.
+      ENDIF.
 
-          ELSE.
-            APPEND VALUE #(
-              %tky   = ls_req-%tky
-              %param = VALUE #(
-                success = abap_false
-                message = ls_apply_result-message
-              )
-            ) TO result.
-          ENDIF.
-
-        CATCH cx_root INTO DATA(lx_error).
-          APPEND VALUE #(
-            %tky   = ls_req-%tky
-            %param = VALUE #(
-              success = abap_false
-              message = lx_error->get_text( )
-            )
-          ) TO result.
-      ENDTRY.
-
+      APPEND VALUE #(
+        %tky = ls_request-%tky
+        %param = VALUE #(
+          success = ls_apply_result-success
+          message = ls_apply_result-message )
+      ) TO result.
     ENDLOOP.
   ENDMETHOD.
 
@@ -135,68 +111,56 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_requests).
 
-    LOOP AT lt_requests INTO DATA(ls_req).
-
-      IF ls_req-status <> 'PENDING'.
+    LOOP AT lt_requests INTO DATA(ls_request).
+      IF ls_request-status <> 'PENDING'.
         APPEND VALUE #(
-          %tky   = ls_req-%tky
+          %tky = ls_request-%tky
           %param = VALUE #(
             success = abap_false
-            message = |Request { ls_req-aprvlid } is not in PENDING status|
-          )
+            message = |Request { ls_request-aprvlid } is not in PENDING status| )
         ) TO result.
         CONTINUE.
       ENDIF.
 
       READ TABLE keys INTO DATA(ls_key)
-        WITH KEY primary_key COMPONENTS %tky = ls_req-%tky.
+        WITH KEY primary_key COMPONENTS %tky = ls_request-%tky.
 
       DATA(lv_remarks) = COND string(
-        WHEN ls_key-%param-remarks IS NOT INITIAL
+        WHEN sy-subrc = 0 AND ls_key-%param-remarks IS NOT INITIAL
         THEN ls_key-%param-remarks
-        ELSE 'Rejected by admin'
-      ).
+        ELSE 'Rejected by admin' ).
 
-      IF ls_req-recordkey = 'BULK'.
-        DATA(ls_bulk_reject) = zcl_excel_bulk_aprvl=>reject_bulk(
-          iv_aprvl_id = ls_req-aprvlid
-          iv_remarks  = lv_remarks ).
+      IF ls_request-recordkey = 'BULK'.
+        DATA(ls_bulk_result) = zcl_excel_bulk_aprvl=>reject_bulk(
+          iv_aprvl_id = ls_request-aprvlid
+          iv_remarks = lv_remarks ).
 
         APPEND VALUE #(
-          %tky   = ls_req-%tky
+          %tky = ls_request-%tky
           %param = VALUE #(
-            success = ls_bulk_reject-success
-            message = ls_bulk_reject-message
-          )
+            success = ls_bulk_result-success
+            message = ls_bulk_result-message )
         ) TO result.
-
         CONTINUE.
       ENDIF.
 
       zcl_aprvl_util=>update_status(
-        iv_aprvl_id = ls_req-aprvlid
-        iv_status   = 'REJECTED'
-        iv_remarks  = lv_remarks
-      ).
+        iv_aprvl_id = ls_request-aprvlid
+        iv_status = 'REJECTED'
+        iv_remarks = lv_remarks ).
 
-      IF sy-subrc = 0.
-        APPEND VALUE #(
-          %tky   = ls_req-%tky
-          %param = VALUE #(
-            success = abap_true
-            message = |Request rejected: { lv_remarks }|
-          )
-        ) TO result.
-      ELSE.
-        APPEND VALUE #(
-          %tky   = ls_req-%tky
-          %param = VALUE #(
-            success = abap_false
-            message = |Update status failed (sy-subrc = { sy-subrc })|
-          )
-        ) TO result.
-      ENDIF.
+      UPDATE ztbl_aprvl_item
+        SET status = 'REJECTED',
+            message = @lv_remarks
+        WHERE aprvl_id = @ls_request-aprvlid
+          AND status = 'PENDING'.
 
+      APPEND VALUE #(
+        %tky = ls_request-%tky
+        %param = VALUE #(
+          success = abap_true
+          message = |Request rejected: { lv_remarks }| )
+      ) TO result.
     ENDLOOP.
   ENDMETHOD.
 

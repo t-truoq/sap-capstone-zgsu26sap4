@@ -11,7 +11,10 @@ define root view entity ZC_TBL_AUDIT
   provider contract transactional_query
   as projection on ZI_TBL_AUDIT
 {
-  @UI.lineItem: [{ position: 10, label: 'Audit ID' }]
+  @UI.lineItem: [
+    { position: 10, label: 'Audit ID' },
+    { type: #FOR_ACTION, dataAction: 'rollback', label: 'Rollback', position: 100 }
+  ]
   @UI.selectionField: [{ position: 10 }]
   key AuditId,
 
