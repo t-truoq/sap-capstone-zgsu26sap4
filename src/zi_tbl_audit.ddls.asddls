@@ -3,15 +3,23 @@
 @EndUserText.label: 'Interface View for Audit Log'
 @Metadata.ignorePropagatedAnnotations: true
 define root view entity ZI_TBL_AUDIT
-  as select from ztbl_audit
+  as select from ztbl_audit as Audit
+  association [0..1] to ztbl_user_perm as _UserPermission
+    on  Audit.table_name = _UserPermission.table_name
+    and _UserPermission.username = $session.user
+  association [0..1] to ztbl_user_master as _CurrentUser
+    on _CurrentUser.username = $session.user
 {
-  key audit_id    as AuditId,
-      table_name  as TableName,
-      record_key  as RecordKey,
-      field_name  as FieldName,
-      old_value   as OldValue,
-      new_value   as NewValue,
-      changed_by  as ChangedBy,
-      changed_at  as ChangedAt,
-      action_type as ActionType
+  key Audit.audit_id    as AuditId,
+      Audit.table_name  as TableName,
+      Audit.record_key  as RecordKey,
+      Audit.field_name  as FieldName,
+      Audit.old_value   as OldValue,
+      Audit.new_value   as NewValue,
+      Audit.changed_by  as ChangedBy,
+      Audit.changed_at  as ChangedAt,
+      Audit.action_type as ActionType
 }
+where _CurrentUser.active_flag = 'X'
+  and ( _CurrentUser.role_type = 'ADMIN'
+     or _UserPermission.can_view = 'X' )

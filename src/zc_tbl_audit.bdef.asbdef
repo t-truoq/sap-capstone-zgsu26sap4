@@ -3,4 +3,5 @@ strict ( 2 );
 
 define behavior for ZC_TBL_AUDIT alias AuditLog
 {
+  use action rollback;
 }

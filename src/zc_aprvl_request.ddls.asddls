@@ -23,7 +23,7 @@ define root view entity ZC_APRVL_REQUEST
     {
       id:            'Items',
       type:          #LINEITEM_REFERENCE,
-      label:         'Excel Approval Items',
+      label:         'Approval Items',
       position:      20,
       targetElement: '_Items'
     }
