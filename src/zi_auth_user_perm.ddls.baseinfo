@@ -1,6 +1,7 @@
 {
   "BASEINFO": {
     "FROM": [
+      "ZTBL_USER_MASTER",
       "ZTBL_USER_PERM"
     ]
   }

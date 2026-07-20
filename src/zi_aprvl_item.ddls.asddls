@@ -6,6 +6,8 @@ define view entity ZI_APRVL_ITEM
   as select from ztbl_aprvl_item
   association to parent ZI_APRVL_REQUEST as _AprvlRequest
     on $projection.AprvlId = _AprvlRequest.AprvlId
+  association [0..1] to ztbl_user_master as _CurrentUser
+    on _CurrentUser.username = $session.user
 {
   key aprvl_id    as AprvlId,
   key item_no     as ItemNo,
@@ -19,3 +21,5 @@ define view entity ZI_APRVL_ITEM
 
       _AprvlRequest
 }
+where _CurrentUser.role_type = 'ADMIN'
+  and _CurrentUser.active_flag = 'X'

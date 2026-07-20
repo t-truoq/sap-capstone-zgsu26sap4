@@ -1,7 +1,8 @@
 {
   "BASEINFO": {
     "FROM": [
-      "ZTBL_TABLE_PERM"
+      "ZTBL_TABLE_PERM",
+      "ZTBL_USER_MASTER"
     ],
     "ASSOCIATED": [
       "ZTBL_USER_MASTER"

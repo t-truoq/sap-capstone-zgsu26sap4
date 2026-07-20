@@ -19,3 +19,4 @@ define root view entity ZI_AUTH_TABLE_PERM
   @Consumption.hidden: true
   _AdminAccess
 }
+where _AdminAccess.active_flag = 'X'

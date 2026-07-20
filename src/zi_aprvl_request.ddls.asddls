@@ -4,6 +4,8 @@
 @Metadata.ignorePropagatedAnnotations: true
 define root view entity ZI_APRVL_REQUEST
   as select from ztbl_aprvl
+  association [0..1] to ztbl_user_master as _CurrentUser
+    on _CurrentUser.username = $session.user
   composition [0..*] of ZI_APRVL_ITEM as _Items
 {
   key aprvl_id      as AprvlId,
@@ -21,3 +23,5 @@ define root view entity ZI_APRVL_REQUEST
 
       _Items
 }
+where _CurrentUser.role_type = 'ADMIN'
+  and _CurrentUser.active_flag = 'X'

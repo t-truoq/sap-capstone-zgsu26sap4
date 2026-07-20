@@ -13,6 +13,17 @@ ENDCLASS.
 CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD get_instance_authorizations.
+    IF zcl_auth_helper=>is_admin( ) <> abap_true.
+      LOOP AT keys INTO DATA(ls_auth_key).
+        APPEND VALUE #(
+          %tky            = ls_auth_key-%tky
+          %action-approve = if_abap_behv=>auth-unauthorized
+          %action-reject  = if_abap_behv=>auth-unauthorized
+        ) TO result.
+      ENDLOOP.
+      RETURN.
+    ENDIF.
+
     READ ENTITIES OF zi_aprvl_request IN LOCAL MODE
       ENTITY aprvlrequest
         FIELDS ( status )
@@ -29,6 +40,18 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD approve.
+    IF zcl_auth_helper=>is_admin( ) <> abap_true.
+      LOOP AT keys INTO DATA(ls_approve_key).
+        APPEND VALUE #(
+          %tky = ls_approve_key-%tky
+          %param = VALUE #(
+            success = abap_false
+            message = |Action APPROVE chỉ dành cho ADMIN| )
+        ) TO result.
+      ENDLOOP.
+      RETURN.
+    ENDIF.
+
     READ ENTITIES OF zi_aprvl_request IN LOCAL MODE
       ENTITY aprvlrequest
         FIELDS ( aprvlid tablename actiontype newdata olddata recordkey status )
@@ -105,6 +128,18 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD reject.
+    IF zcl_auth_helper=>is_admin( ) <> abap_true.
+      LOOP AT keys INTO DATA(ls_reject_key).
+        APPEND VALUE #(
+          %tky = ls_reject_key-%tky
+          %param = VALUE #(
+            success = abap_false
+            message = |Action REJECT chỉ dành cho ADMIN| )
+        ) TO result.
+      ENDLOOP.
+      RETURN.
+    ENDIF.
+
     READ ENTITIES OF zi_aprvl_request IN LOCAL MODE
       ENTITY aprvlrequest
         FIELDS ( aprvlid recordkey status )
