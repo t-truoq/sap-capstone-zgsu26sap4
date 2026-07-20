@@ -1,7 +1,8 @@
 {
   "BASEINFO": {
     "FROM": [
-      "ZTBL_APRVL_ITEM"
+      "ZTBL_APRVL_ITEM",
+      "ZTBL_USER_MASTER"
     ],
     "ASSOCIATED": [
       "ZI_APRVL_REQUEST"
