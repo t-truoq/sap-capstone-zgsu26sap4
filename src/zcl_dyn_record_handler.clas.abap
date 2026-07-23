@@ -9,12 +9,21 @@ TYPES:
         record_key  TYPE ztde_record_key,  "key JSON sau thao tác
       END OF ty_result.
 
+    TYPES:
+      BEGIN OF ty_validation_error,
+        fieldname TYPE fieldname,
+        value     TYPE string,
+        message   TYPE string,
+      END OF ty_validation_error,
+      tt_validation_errors TYPE STANDARD TABLE OF ty_validation_error WITH DEFAULT KEY.
+
     "INSERT 1 record vào bảng động.
     "Đã bao gồm: deserialize, autofill, insert, audit log.
     CLASS-METHODS create_record
       IMPORTING
         iv_table_name  TYPE tabname
         iv_record_data TYPE string
+        iv_parent_audit_id TYPE sysuuid_c32 OPTIONAL
       RETURNING
         VALUE(rs_result) TYPE ty_result.
 
@@ -26,6 +35,7 @@ TYPES:
         iv_record_data TYPE string
         iv_etag_field  TYPE string OPTIONAL
         iv_etag_value  TYPE string OPTIONAL
+        iv_parent_audit_id TYPE sysuuid_c32 OPTIONAL
       RETURNING
         VALUE(rs_result) TYPE ty_result.
 
@@ -35,6 +45,7 @@ TYPES:
       IMPORTING
         iv_table_name TYPE tabname
         iv_record_key TYPE ztde_record_key
+        iv_parent_audit_id TYPE sysuuid_c32 OPTIONAL
       RETURNING
         VALUE(rs_result) TYPE ty_result.
 
@@ -88,6 +99,19 @@ CLASS-METHODS serialize
       CHANGING  ca_record TYPE REF TO data
       RAISING   cx_root.
 
+    "Deserialize JSON array into single-row data references.
+    "Each row goes through deserialize() so RAW/UUID handling stays identical.
+    TYPES tt_data_refs TYPE STANDARD TABLE OF REF TO data WITH DEFAULT KEY.
+
+    CLASS-METHODS deserialize_batch
+      IMPORTING
+        iv_table_name  TYPE tabname
+        iv_json_array  TYPE string
+      RETURNING
+        VALUE(rt_refs) TYPE tt_data_refs
+      RAISING
+        cx_root.
+
 CLASS-METHODS on_create
       IMPORTING iv_table_name TYPE tabname
                 ir_record     TYPE REF TO data.
@@ -114,6 +138,12 @@ CLASS-METHODS on_create
       IMPORTING it_key_fields      TYPE string_table
                 ir_record          TYPE REF TO data
       RETURNING VALUE(rv_key_json) TYPE string.
+
+    CLASS-METHODS validate_domain_values
+      IMPORTING
+        iv_table_name TYPE tabname
+        ir_record     TYPE REF TO data
+      RETURNING VALUE(rt_errors) TYPE tt_validation_errors.
 PRIVATE SECTION.
 CLASS-METHODS serialize_struct
       IMPORTING ia_struct      TYPE any
@@ -128,6 +158,10 @@ CLASS-METHODS serialize_struct
       IMPORTING iv_json        TYPE string
                 iv_field_name  TYPE string
       RETURNING VALUE(rv_value) TYPE string.
+
+    CLASS-METHODS split_json_array
+      IMPORTING iv_json         TYPE string
+      RETURNING VALUE(rt_items) TYPE string_table.
 
 CLASS-METHODS fill_client
       IMPORTING ir_record TYPE REF TO data.
@@ -159,6 +193,27 @@ CLASS-METHODS fill_client
       IMPORTING iv_table_name   TYPE tabname
                 iv_fieldname    TYPE fieldname
       RETURNING VALUE(rv_is_fk) TYPE abap_bool.
+
+    TYPES:
+      BEGIN OF ty_check_info,
+        checktable TYPE tabname,
+        has_fixed  TYPE abap_bool,
+      END OF ty_check_info.
+
+    CLASS-METHODS get_domain_check_info
+      IMPORTING iv_table_name TYPE tabname
+                iv_fieldname  TYPE fieldname
+      RETURNING VALUE(rs_info) TYPE ty_check_info.
+
+    CLASS-METHODS check_fixed_value
+      IMPORTING iv_table_name TYPE tabname
+                iv_fieldname  TYPE fieldname
+                iv_value      TYPE string
+      RETURNING VALUE(rv_valid) TYPE abap_bool.
+
+    CLASS-METHODS build_validation_message
+      IMPORTING it_errors TYPE tt_validation_errors
+      RETURNING VALUE(rv_msg) TYPE string.
 ENDCLASS.
 
 
@@ -174,6 +229,16 @@ METHOD create_record.
           EXPORTING iv_json   = iv_record_data
           CHANGING  ca_record = lo_record
         ).
+
+        DATA(lt_val_errors) = validate_domain_values(
+          iv_table_name = iv_table_name
+          ir_record     = lo_record ).
+        IF lt_val_errors IS NOT INITIAL.
+          rs_result = VALUE #(
+            success = abap_false
+            message = build_validation_message( lt_val_errors ) ).
+          RETURN.
+        ENDIF.
 
         zcl_dyn_record_handler=>on_create(
           iv_table_name = iv_table_name
@@ -193,7 +258,8 @@ METHOD create_record.
             iv_table_name  = iv_table_name
             iv_record_key  = CONV #( lv_key_j )
             iv_action_type = 'C'
-            iv_new_value   = iv_record_data
+            iv_new_value   = zcl_dyn_record_handler=>serialize( <ls_record> )
+            iv_parent_audit_id = iv_parent_audit_id
           ).
 
           rs_result = VALUE #(
@@ -229,6 +295,16 @@ METHOD create_record.
           EXPORTING iv_json   = iv_record_data
           CHANGING  ca_record = lo_new
         ).
+
+        DATA(lt_val_errors) = validate_domain_values(
+          iv_table_name = iv_table_name
+          ir_record     = lo_new ).
+        IF lt_val_errors IS NOT INITIAL.
+          rs_result = VALUE #(
+            success = abap_false
+            message = build_validation_message( lt_val_errors ) ).
+          RETURN.
+        ENDIF.
 
         "── Select old record ──
         DATA lo_old TYPE REF TO data.
@@ -284,7 +360,8 @@ METHOD create_record.
           iv_record_key  = CONV #( lv_key_json )
           iv_action_type = 'U'
           iv_old_value   = lv_old_json
-          iv_new_value   = iv_record_data
+          iv_new_value   = zcl_dyn_record_handler=>serialize( <ls_new> )
+          iv_parent_audit_id = iv_parent_audit_id
         ).
 
         UPDATE (iv_table_name) FROM <ls_new>.
@@ -362,6 +439,7 @@ METHOD create_record.
             iv_record_key  = iv_record_key
             iv_action_type = 'D'
             iv_old_value   = lv_old_json
+            iv_parent_audit_id = iv_parent_audit_id
           ).
           rs_result = VALUE #(
             success    = abap_true
@@ -717,6 +795,99 @@ METHOD serialize.
         CHANGING  ca_record    = ca_record
       ).
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD deserialize_batch.
+    DATA(lo_desc)       = get_struct_desc( iv_table_name ).
+    DATA(lt_json_items) = split_json_array( iv_json_array ).
+
+    IF lt_json_items IS INITIAL.
+      RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
+        EXPORTING value = 'JSON array is empty or invalid'.
+    ENDIF.
+
+    LOOP AT lt_json_items INTO DATA(lv_item_json).
+      DATA lr_item TYPE REF TO data.
+      CREATE DATA lr_item TYPE HANDLE lo_desc.
+
+      zcl_dyn_record_handler=>deserialize(
+        EXPORTING iv_json   = lv_item_json
+        CHANGING  ca_record = lr_item
+      ).
+
+      APPEND lr_item TO rt_refs.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD split_json_array.
+    DATA lv_obj_depth TYPE i VALUE 0.
+    DATA lv_in_str    TYPE abap_bool VALUE abap_false.
+    DATA lv_escape    TYPE abap_bool VALUE abap_false.
+    DATA lv_item      TYPE string.
+    DATA lv_started   TYPE abap_bool VALUE abap_false.
+    DATA lv_char      TYPE c LENGTH 1.
+    DATA lv_len       TYPE i.
+    DATA lv_idx       TYPE i.
+
+    lv_len = strlen( iv_json ).
+
+    DO lv_len TIMES.
+      lv_idx  = sy-index - 1.
+      lv_char = iv_json+lv_idx(1).
+
+      IF lv_in_str = abap_true.
+        IF lv_started = abap_true.
+          lv_item = lv_item && lv_char.
+        ENDIF.
+        IF lv_escape = abap_true.
+          lv_escape = abap_false.
+        ELSEIF lv_char = '\'.
+          lv_escape = abap_true.
+        ELSEIF lv_char = '"'.
+          lv_in_str = abap_false.
+        ENDIF.
+        CONTINUE.
+      ENDIF.
+
+      CASE lv_char.
+        WHEN '"'.
+          lv_in_str = abap_true.
+          IF lv_started = abap_true.
+            lv_item = lv_item && lv_char.
+          ENDIF.
+
+        WHEN '{'.
+          IF lv_obj_depth = 0.
+            lv_started = abap_true.
+            CLEAR lv_item.
+          ENDIF.
+          lv_obj_depth = lv_obj_depth + 1.
+          IF lv_started = abap_true.
+            lv_item = lv_item && lv_char.
+          ENDIF.
+
+        WHEN '}'.
+          IF lv_started = abap_true.
+            lv_item = lv_item && lv_char.
+          ENDIF.
+          lv_obj_depth = lv_obj_depth - 1.
+          IF lv_obj_depth = 0.
+            APPEND lv_item TO rt_items.
+            lv_started = abap_false.
+            CLEAR lv_item.
+          ENDIF.
+
+        WHEN '[' OR ']'.
+          IF lv_started = abap_true.
+            lv_item = lv_item && lv_char.
+          ENDIF.
+
+        WHEN OTHERS.
+          IF lv_started = abap_true.
+            lv_item = lv_item && lv_char.
+          ENDIF.
+      ENDCASE.
+    ENDDO.
   ENDMETHOD.
 
 METHOD assign_hex_to_raw.
@@ -1081,5 +1252,129 @@ METHOD build_where_clause.
     rv_key_json &&= `}`.
   ENDMETHOD.
 
+  METHOD validate_domain_values.
+    DATA(lo_desc) = get_struct_desc( iv_table_name ).
+    ASSIGN ir_record->* TO FIELD-SYMBOL(<record>).
+    IF <record> IS NOT ASSIGNED.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lo_desc->get_components( ) INTO DATA(ls_component).
+      IF ls_component-name = 'MANDT' OR ls_component-name = 'CLIENT'.
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT ls_component-name OF STRUCTURE <record>
+        TO FIELD-SYMBOL(<value>).
+      IF sy-subrc <> 0 OR <value> IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_value) = |{ <value> }|.
+      CONDENSE lv_value.
+      DATA(lv_fieldname) = CONV fieldname( ls_component-name ).
+      DATA(ls_check) = get_domain_check_info(
+        iv_table_name = iv_table_name
+        iv_fieldname  = lv_fieldname ).
+
+      IF ls_check-checktable IS NOT INITIAL.
+        DATA(lv_exists) = abap_false.
+        DATA(lv_where) = |{ lv_fieldname } = '{ lv_value }'|.
+        TRY.
+            SELECT SINGLE @abap_true
+              FROM (ls_check-checktable)
+              WHERE (lv_where)
+              INTO @lv_exists.
+          CATCH cx_sy_dynamic_osql_error.
+            CONTINUE.
+        ENDTRY.
+        IF lv_exists IS INITIAL.
+          APPEND VALUE #(
+            fieldname = lv_fieldname
+            value     = lv_value
+            message   = |{ lv_fieldname } = '{ lv_value }' does not exist in { ls_check-checktable }| )
+            TO rt_errors.
+        ENDIF.
+      ELSEIF ls_check-has_fixed = abap_true
+         AND check_fixed_value(
+               iv_table_name = iv_table_name
+               iv_fieldname  = lv_fieldname
+               iv_value      = lv_value ) = abap_false.
+        APPEND VALUE #(
+          fieldname = lv_fieldname
+          value     = lv_value
+          message   = |{ lv_fieldname } = '{ lv_value }' is not a valid fixed value| )
+          TO rt_errors.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD get_domain_check_info.
+    SELECT SINGLE rollname
+      FROM dd03l
+      WHERE tabname = @iv_table_name
+        AND fieldname = @iv_fieldname
+        AND as4local = 'A'
+      INTO @DATA(lv_rollname).
+    IF sy-subrc <> 0 OR lv_rollname IS INITIAL.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE domname
+      FROM dd04l
+      WHERE rollname = @lv_rollname
+        AND as4local = 'A'
+      INTO @DATA(lv_domname).
+    IF sy-subrc <> 0 OR lv_domname IS INITIAL.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE entitytab
+      FROM dd01l
+      WHERE domname = @lv_domname
+        AND as4local = 'A'
+      INTO @rs_info-checktable.
+    IF rs_info-checktable IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE @abap_true
+      FROM dd07l
+      WHERE domname = @lv_domname
+        AND as4local = 'A'
+      INTO @rs_info-has_fixed.
+  ENDMETHOD.
+
+  METHOD check_fixed_value.
+    SELECT SINGLE rollname
+      FROM dd03l
+      WHERE tabname = @iv_table_name
+        AND fieldname = @iv_fieldname
+        AND as4local = 'A'
+      INTO @DATA(lv_rollname).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE domname
+      FROM dd04l
+      WHERE rollname = @lv_rollname
+        AND as4local = 'A'
+      INTO @DATA(lv_domname).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE @abap_true
+      FROM dd07l
+      WHERE domname = @lv_domname
+        AND as4local = 'A'
+        AND domvalue_l = @iv_value
+      INTO @rv_valid.
+  ENDMETHOD.
+
+  METHOD build_validation_message.
+    LOOP AT it_errors INTO DATA(ls_error).
+      rv_msg = COND #(
+        WHEN rv_msg IS INITIAL THEN ls_error-message
+        ELSE rv_msg && `; ` && ls_error-message ).
+    ENDLOOP.
+  ENDMETHOD.
+
 ENDCLASS.
+
 

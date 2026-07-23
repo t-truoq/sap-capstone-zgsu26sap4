@@ -27,7 +27,7 @@ CLASS lhc_AuthTablePerm IMPLEMENTATION.
 
     LOOP AT keys INTO DATA(ls_key).
       READ TABLE lt_policies INTO DATA(ls_policy)
-        WITH KEY TableName = ls_key-TableName.
+        WITH KEY TableName = ls_key-TableName ##PRIMKEY[ID].
 
       IF sy-subrc = 0.
         zcl_auth_helper=>apply_table_policy(

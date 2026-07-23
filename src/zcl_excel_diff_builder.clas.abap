@@ -688,6 +688,12 @@ METHOD confirm_import.
     ENDIF.
 
     " 4) Loop commit từng group (không fail cả batch)
+    DATA lv_parent_audit_id TYPE sysuuid_c32.
+    TRY.
+        lv_parent_audit_id = cl_system_uuid=>create_uuid_c32_static( ).
+      CATCH cx_uuid_error.
+    ENDTRY.
+
     LOOP AT lt_groups INTO DATA(ls_group).
       TRY.
           CASE ls_group-status.
@@ -716,6 +722,7 @@ METHOD confirm_import.
                 iv_record_key  = CONV ztde_record_key( lv_new_key_json )
                 iv_old_value   = ''
                 iv_new_value   = lv_new_full_json
+                iv_parent_audit_id = lv_parent_audit_id
                 iv_action_type = zcl_excel_types=>c_action-create ).
 
             WHEN zcl_excel_types=>c_status-changed.
@@ -806,6 +813,7 @@ METHOD confirm_import.
                 iv_record_key  = CONV ztde_record_key( ls_group-record_key )
                 iv_old_value   = lv_update_old_json
                 iv_new_value   = lv_update_new_json
+                iv_parent_audit_id = lv_parent_audit_id
                 iv_action_type = zcl_excel_types=>c_action-update ).
 
             WHEN zcl_excel_types=>c_status-delete.
@@ -837,6 +845,7 @@ METHOD confirm_import.
                   iv_field_name  = CONV ztde_field_name( c_action_field )
                   iv_old_value   = lv_old_json_del
                   iv_new_value   = ''
+                  iv_parent_audit_id = lv_parent_audit_id
                   iv_action_type = zcl_excel_types=>c_action-delete ).
               ELSE.
                 rs_summary-error_count = rs_summary-error_count + 1.
@@ -1136,5 +1145,6 @@ METHOD confirm_import.
   ENDMETHOD.
 
 ENDCLASS.
+
 
 

@@ -9,6 +9,7 @@ define root view entity ZI_TBL_AUDIT
     and _UserPermission.username = $session.user
   association [0..1] to ztbl_user_master as _CurrentUser
     on _CurrentUser.username = $session.user
+  composition [0..*] of ZI_TBL_AUDIT_ITEM as _Items
 {
   key Audit.audit_id    as AuditId,
       Audit.table_name  as TableName,
@@ -18,7 +19,10 @@ define root view entity ZI_TBL_AUDIT
       Audit.new_value   as NewValue,
       Audit.changed_by  as ChangedBy,
       Audit.changed_at  as ChangedAt,
-      Audit.action_type as ActionType
+      Audit.action_type as ActionType,
+      Audit.rollback_audit_id as RollbackAuditId,
+
+      _Items
 }
 where _CurrentUser.active_flag = 'X'
   and ( _CurrentUser.role_type = 'ADMIN'

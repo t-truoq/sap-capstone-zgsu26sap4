@@ -1,12 +1,12 @@
 {
   "BASEINFO": {
     "FROM": [
-      "ZTBL_AUDIT",
+      "ZTBL_AUDIT_ITEM",
       "ZTBL_USER_MASTER",
       "ZTBL_USER_PERM"
     ],
     "ASSOCIATED": [
-      "ZI_TBL_AUDIT_ITEM"
+      "ZI_TBL_AUDIT"
     ]
   }
 }
