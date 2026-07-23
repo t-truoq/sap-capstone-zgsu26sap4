@@ -41,12 +41,13 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD approve.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
+      DATA(lv_msg_approve_admin) = |Action APPROVE chỉ dành cho ADMIN| ##NO_TEXT.
       LOOP AT keys INTO DATA(ls_approve_key).
         APPEND VALUE #(
           %tky = ls_approve_key-%tky
           %param = VALUE #(
             success = abap_false
-            message = |Action APPROVE chỉ dành cho ADMIN| )
+            message = lv_msg_approve_admin )
         ) TO result.
       ENDLOOP.
       RETURN.
@@ -60,11 +61,12 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
+        DATA(lv_msg_not_pending_a) = |Request { ls_request-aprvlid } is not in PENDING status| ##NO_TEXT.
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
             success = abap_false
-            message = |Request { ls_request-aprvlid } is not in PENDING status| )
+            message = lv_msg_not_pending_a )
         ) TO result.
         CONTINUE.
       ENDIF.
@@ -101,9 +103,10 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
             iv_record_key = ls_request-recordkey ).
 
         WHEN OTHERS.
+          DATA(lv_msg_unsupported) = |Unsupported approval action { ls_request-actiontype }| ##NO_TEXT.
           ls_apply_result = VALUE #(
             success = abap_false
-            message = |Unsupported approval action { ls_request-actiontype }| ).
+            message = lv_msg_unsupported ).
       ENDCASE.
 
       IF ls_apply_result-success = abap_true.
@@ -129,12 +132,13 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD reject.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
+      DATA(lv_msg_reject_admin) = |Action REJECT chỉ dành cho ADMIN| ##NO_TEXT.
       LOOP AT keys INTO DATA(ls_reject_key).
         APPEND VALUE #(
           %tky = ls_reject_key-%tky
           %param = VALUE #(
             success = abap_false
-            message = |Action REJECT chỉ dành cho ADMIN| )
+            message = lv_msg_reject_admin )
         ) TO result.
       ENDLOOP.
       RETURN.
@@ -146,24 +150,27 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_requests).
 
+    DATA(lv_default_reject_remark) = 'Rejected by admin' ##NO_TEXT.
+
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
+        DATA(lv_msg_not_pending_r) = |Request { ls_request-aprvlid } is not in PENDING status| ##NO_TEXT.
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
             success = abap_false
-            message = |Request { ls_request-aprvlid } is not in PENDING status| )
+            message = lv_msg_not_pending_r )
         ) TO result.
         CONTINUE.
       ENDIF.
 
       READ TABLE keys INTO DATA(ls_key)
-        WITH KEY primary_key COMPONENTS %tky = ls_request-%tky.
+        WITH KEY primary_key COMPONENTS %tky = ls_request-%tky ##PRIMKEY[ID].
 
       DATA(lv_remarks) = COND string(
         WHEN sy-subrc = 0 AND ls_key-%param-remarks IS NOT INITIAL
         THEN ls_key-%param-remarks
-        ELSE 'Rejected by admin' ).
+        ELSE lv_default_reject_remark ).
 
       IF ls_request-recordkey = 'BULK'.
         DATA(ls_bulk_result) = zcl_excel_bulk_aprvl=>reject_bulk(
@@ -190,11 +197,12 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WHERE aprvl_id = @ls_request-aprvlid
           AND status = 'PENDING'.
 
+      DATA(lv_msg_rejected) = |Request rejected: { lv_remarks }| ##NO_TEXT.
       APPEND VALUE #(
         %tky = ls_request-%tky
         %param = VALUE #(
           success = abap_true
-          message = |Request rejected: { lv_remarks }| )
+          message = lv_msg_rejected )
       ) TO result.
     ENDLOOP.
   ENDMETHOD.

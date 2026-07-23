@@ -83,6 +83,7 @@ CLASS-METHODS:
           iv_field_name  TYPE ztde_field_name OPTIONAL
           iv_old_value   TYPE string OPTIONAL
           iv_new_value   TYPE string OPTIONAL
+          iv_parent_audit_id TYPE sysuuid_c32 OPTIONAL
           iv_action_type TYPE ztde_action_type.
 ENDCLASS.
 
@@ -311,25 +312,73 @@ METHOD check_and_submit.
 
 METHOD log_change.
     TRY.
-        DATA(lv_audit_id) = cl_system_uuid=>create_uuid_c32_static( ).
+        DATA(lv_audit_id) = iv_parent_audit_id.
+        DATA(lv_is_bulk) = xsdbool( lv_audit_id IS NOT INITIAL ).
+        IF lv_audit_id IS INITIAL.
+          lv_audit_id = cl_system_uuid=>create_uuid_c32_static( ).
+        ENDIF.
 
-        INSERT ztbl_audit FROM @(
-          VALUE ztbl_audit(
+        SELECT SINGLE audit_id FROM ztbl_audit
+          WHERE audit_id = @lv_audit_id
+          INTO @DATA(lv_parent_exists).
+
+        IF sy-subrc <> 0.
+          DATA(lv_parent_record_key) = COND ztde_record_key(
+            WHEN lv_is_bulk = abap_true THEN 'BULK'
+            ELSE iv_record_key ).
+          DATA(lv_parent_field_name) = COND ztde_field_name(
+            WHEN lv_is_bulk = abap_true THEN space
+            ELSE iv_field_name ).
+          DATA lv_parent_old_value TYPE ztbl_audit-old_value.
+          DATA lv_parent_new_value TYPE ztbl_audit-new_value.
+          IF lv_is_bulk = abap_true.
+            lv_parent_new_value = 'Bulk audit'.
+          ELSE.
+            lv_parent_old_value = iv_old_value.
+            lv_parent_new_value = iv_new_value.
+          ENDIF.
+
+          INSERT ztbl_audit FROM @(
+            VALUE ztbl_audit(
+              audit_id    = lv_audit_id
+              table_name  = iv_table_name
+              record_key  = lv_parent_record_key
+              field_name  = lv_parent_field_name
+              old_value   = lv_parent_old_value
+              new_value   = lv_parent_new_value
+              changed_by  = sy-uname
+              changed_at  = utclong_current( )
+              action_type = iv_action_type ) ).
+        ENDIF.
+
+        SELECT MAX( item_no ) FROM ztbl_audit_item
+          WHERE audit_id = @lv_audit_id
+          INTO @DATA(lv_last_item_no).
+
+        DATA lv_item_no TYPE n LENGTH 6.
+        lv_item_no = CONV i( lv_last_item_no ) + 1.
+        INSERT ztbl_audit_item FROM @(
+          VALUE ztbl_audit_item(
             audit_id    = lv_audit_id
+            item_no     = lv_item_no
             table_name  = iv_table_name
             record_key  = iv_record_key
             field_name  = iv_field_name
-            old_value   = CONV #( iv_old_value )
-            new_value   = CONV #( iv_new_value )
-            changed_by  = sy-uname
-            changed_at  = utclong_current( )
-            action_type = iv_action_type
-          )
-        ).
+            old_value   = iv_old_value
+            new_value   = iv_new_value
+            action_type = iv_action_type ) ).
+
+        IF lv_is_bulk = abap_true.
+          DATA(lv_summary) = |Bulk audit: { lv_item_no } item(s)|.
+          UPDATE ztbl_audit
+            SET new_value = @lv_summary
+            WHERE audit_id = @lv_audit_id.
+        ENDIF.
 
       CATCH cx_uuid_error.
     ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.
+
 

@@ -4,4 +4,10 @@ strict ( 2 );
 define behavior for ZC_TBL_AUDIT alias AuditLog
 {
   use action rollback;
+  use association _Items;
+}
+
+define behavior for ZC_TBL_AUDIT_ITEM alias AuditItem
+{
+  use association _AuditLog;
 }

@@ -5,13 +5,14 @@ CLASS lhc_ExcelPipeline DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
 
     METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION
-      IMPORTING REQUEST requested_authorizations FOR ExcelPipeline RESULT result.
+      IMPORTING REQUEST requested_authorizations ##NEEDED
+      FOR ExcelPipeline RESULT result ##NEEDED.
 
     METHODS read FOR READ
       IMPORTING keys FOR READ ExcelPipeline RESULT result.
 
     METHODS lock FOR LOCK
-      IMPORTING keys FOR LOCK ExcelPipeline.
+      IMPORTING keys FOR LOCK ExcelPipeline ##NEEDED.
 
     METHODS downloadExcel FOR MODIFY
       IMPORTING keys FOR ACTION ExcelPipeline~downloadExcel RESULT result.
@@ -26,7 +27,7 @@ ENDCLASS.
 
 CLASS lhc_ExcelPipeline IMPLEMENTATION.
 
-  METHOD get_global_authorizations.
+  METHOD get_global_authorizations ##NEEDED.
     " Dev: cho phep tat ca. Phan quyen that khai bao sau (auth-allowed per action).
   ENDMETHOD.
 
@@ -38,7 +39,7 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
       INTO CORRESPONDING FIELDS OF TABLE @result.
   ENDMETHOD.
 
-  METHOD lock.
+  METHOD lock ##NEEDED.
   ENDMETHOD.
 
   METHOD downloadExcel.
@@ -89,19 +90,34 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
             IMPORTING et_diff = lt_diff
                       ev_info = lv_info ).
         CATCH zcx_excel_pipeline INTO DATA(lx).
-          APPEND VALUE #(
-            id      = cl_system_uuid=>create_uuid_x16_static( )
-            row_no  = 0
-            status  = 'ERROR'
-            message = lx->get_text( ) ) TO lt_diff.
+          TRY.
+              APPEND VALUE #(
+                id      = cl_system_uuid=>create_uuid_x16_static( )
+                row_no  = 0
+                status  = 'ERROR'
+                message = lx->get_text( ) ) TO lt_diff.
+            CATCH cx_uuid_error.
+              " UUID generation failed - skip row id, keep processing.
+              APPEND VALUE #(
+                row_no  = 0
+                status  = 'ERROR'
+                message = lx->get_text( ) ) TO lt_diff.
+          ENDTRY.
       ENDTRY.
 
       IF lv_info IS NOT INITIAL.
-        INSERT VALUE #(
-          id      = cl_system_uuid=>create_uuid_x16_static( )
-          row_no  = 0
-          status  = 'INFO'
-          message = lv_info ) INTO lt_diff INDEX 1.
+        TRY.
+            INSERT VALUE #(
+              id      = cl_system_uuid=>create_uuid_x16_static( )
+              row_no  = 0
+              status  = 'INFO'
+              message = lv_info ) INTO lt_diff INDEX 1.
+          CATCH cx_uuid_error.
+            INSERT VALUE #(
+              row_no  = 0
+              status  = 'INFO'
+              message = lv_info ) INTO lt_diff INDEX 1.
+        ENDTRY.
       ENDIF.
 
       LOOP AT lt_diff INTO DATA(ls_diff).
@@ -153,9 +169,9 @@ CLASS lsc_ZI_EXCEL_PIPELINE DEFINITION INHERITING FROM cl_abap_behavior_saver.
 ENDCLASS.
 
 CLASS lsc_ZI_EXCEL_PIPELINE IMPLEMENTATION.
-  METHOD finalize.          ENDMETHOD.
-  METHOD check_before_save. ENDMETHOD.
-  METHOD save.              ENDMETHOD.
-  METHOD cleanup.           ENDMETHOD.
-  METHOD cleanup_finalize.  ENDMETHOD.
+  METHOD finalize ##NEEDED.          ENDMETHOD.
+  METHOD check_before_save ##NEEDED. ENDMETHOD.
+  METHOD save ##NEEDED.              ENDMETHOD.
+  METHOD cleanup ##NEEDED.           ENDMETHOD.
+  METHOD cleanup_finalize ##NEEDED.  ENDMETHOD.
 ENDCLASS.

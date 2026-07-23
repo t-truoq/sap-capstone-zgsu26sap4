@@ -2,6 +2,12 @@
   "BASEINFO": {
     "FROM": [
       "ZI_TBL_AUDIT"
+    ],
+    "ASSOCIATED": [
+      "ZC_TBL_AUDIT_ITEM"
+    ],
+    "BASE": [
+      "ZI_TBL_AUDIT"
     ]
   }
 }

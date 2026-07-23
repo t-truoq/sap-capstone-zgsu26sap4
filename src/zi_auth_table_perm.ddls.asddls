@@ -1,5 +1,5 @@
 @AbapCatalog.viewEnhancementCategory: [#NONE]
-@AccessControl.authorizationCheck: #CHECK
+@AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Auth Admin - Table Permissions'
 @Metadata.ignorePropagatedAnnotations: true
 define root view entity ZI_AUTH_TABLE_PERM

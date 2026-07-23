@@ -118,14 +118,9 @@ METHOD get_auth_by_status.
         AND table_name = @iv_table_name
       INTO CORRESPONDING FIELDS OF @rs_perm.
 
-    DATA(ls_table_perm) = get_table_permissions(
-      iv_table_name = iv_table_name ).
-
-    rs_perm-can_view   = COND #( WHEN rs_perm-can_view   = abap_true AND ls_table_perm-can_view   = abap_true THEN abap_true ELSE abap_false ).
-    rs_perm-can_create = COND #( WHEN rs_perm-can_create = abap_true AND ls_table_perm-can_create = abap_true THEN abap_true ELSE abap_false ).
-    rs_perm-can_update = COND #( WHEN rs_perm-can_update = abap_true AND ls_table_perm-can_update = abap_true THEN abap_true ELSE abap_false ).
-    rs_perm-can_delete = COND #( WHEN rs_perm-can_delete = abap_true AND ls_table_perm-can_delete = abap_true THEN abap_true ELSE abap_false ).
-    rs_perm-can_upload = COND #( WHEN rs_perm-can_upload = abap_true AND ls_table_perm-can_upload = abap_true THEN abap_true ELSE abap_false ).
+    IF sy-subrc <> 0.
+      rs_perm = get_table_permissions( iv_table_name = iv_table_name ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD get_table_permissions.
@@ -177,22 +172,6 @@ METHOD get_auth_by_status.
         EXPORTING iv_text = |Action { iv_action } chỉ dành cho ADMIN|.
     ENDIF.
 
-    SELECT SINGLE can_approve, can_rollback, can_config, can_force_unlock
-      FROM ztbl_admin_perm
-      WHERE username = @iv_username
-      INTO @DATA(ls_admin).
-
-    DATA(lv_allowed) = SWITCH abap_bool( iv_action
-      WHEN c_admin_action-approve      THEN ls_admin-can_approve
-      WHEN c_admin_action-rollback     THEN ls_admin-can_rollback
-      WHEN c_admin_action-config       THEN ls_admin-can_config
-      WHEN c_admin_action-force_unlock THEN ls_admin-can_force_unlock
-      ELSE abap_false ).
-
-    IF lv_allowed <> abap_true.
-      RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |ADMIN { iv_username } chưa được cấp quyền { iv_action }|.
-    ENDIF.
   ENDMETHOD.
 
 METHOD sync_user.
@@ -252,30 +231,8 @@ METHOD sync_user.
               can_delete = ls_policy-can_delete
               can_upload = ls_policy-can_upload ) ).
           ELSE.
-            IF ls_policy-can_view = abap_false.
-              CLEAR ls_existing_perm-can_view.
-            ENDIF.
-            IF ls_policy-can_create = abap_false.
-              CLEAR ls_existing_perm-can_create.
-            ENDIF.
-            IF ls_policy-can_update = abap_false.
-              CLEAR ls_existing_perm-can_update.
-            ENDIF.
-            IF ls_policy-can_delete = abap_false.
-              CLEAR ls_existing_perm-can_delete.
-            ENDIF.
-            IF ls_policy-can_upload = abap_false.
-              CLEAR ls_existing_perm-can_upload.
-            ENDIF.
-
-            UPDATE ztbl_user_perm
-              SET can_view   = @ls_existing_perm-can_view,
-                  can_create = @ls_existing_perm-can_create,
-                  can_update = @ls_existing_perm-can_update,
-                  can_delete = @ls_existing_perm-can_delete,
-                  can_upload = @ls_existing_perm-can_upload
-              WHERE username   = @iv_username
-                AND table_name = @ls_table-table_name.
+            " Existing user permissions are explicit overrides. Keep them
+            " when the table default changes.
           ENDIF.
         ENDLOOP.
 
@@ -391,4 +348,5 @@ METHOD sync_user.
   ENDMETHOD.
 
 ENDCLASS.
+
 

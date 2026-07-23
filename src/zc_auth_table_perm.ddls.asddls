@@ -1,5 +1,5 @@
 @AbapCatalog.viewEnhancementCategory: [#NONE]
-@AccessControl.authorizationCheck: #CHECK
+@AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Auth Admin - Table Permissions'
 @Metadata.ignorePropagatedAnnotations: false
 @UI.headerInfo: {

@@ -45,7 +45,8 @@ CLASS zcl_excel_bulk_aprvl DEFINITION
 
   PRIVATE SECTION.
     CLASS-METHODS apply_single_item
-      IMPORTING is_item TYPE ztbl_aprvl_item
+      IMPORTING is_item          TYPE ztbl_aprvl_item
+                iv_parent_audit_id TYPE sysuuid_c32
       RAISING   cx_root.
 
 ENDCLASS.
@@ -165,8 +166,11 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
     ENDIF.
 
     TRY.
+        DATA(lv_parent_audit_id) = cl_system_uuid=>create_uuid_c32_static( ).
         LOOP AT lt_items INTO DATA(ls_item).
-          apply_single_item( ls_item ).
+          apply_single_item(
+            is_item           = ls_item
+            iv_parent_audit_id = lv_parent_audit_id ).
         ENDLOOP.
 
         DATA(lv_now) = utclong_current( ).
@@ -236,17 +240,20 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
       WHEN zcl_excel_types=>c_action-create.
         ls_result = zcl_dyn_record_handler=>create_record(
           iv_table_name  = CONV tabname( is_item-table_name )
-          iv_record_data = is_item-new_data ).
+          iv_record_data = is_item-new_data
+          iv_parent_audit_id = iv_parent_audit_id ).
 
       WHEN zcl_excel_types=>c_action-update.
         ls_result = zcl_dyn_record_handler=>update_record(
           iv_table_name  = CONV tabname( is_item-table_name )
-          iv_record_data = is_item-new_data ).
+          iv_record_data = is_item-new_data
+          iv_parent_audit_id = iv_parent_audit_id ).
 
       WHEN zcl_excel_types=>c_action-delete.
         ls_result = zcl_dyn_record_handler=>delete_record(
           iv_table_name = CONV tabname( is_item-table_name )
-          iv_record_key = is_item-record_key ).
+          iv_record_key = is_item-record_key
+          iv_parent_audit_id = iv_parent_audit_id ).
 
       WHEN OTHERS.
         RAISE EXCEPTION TYPE zcx_excel_pipeline
@@ -260,4 +267,5 @@ CLASS zcl_excel_bulk_aprvl IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
 

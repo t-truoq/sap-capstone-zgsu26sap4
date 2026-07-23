@@ -1,13 +1,11 @@
 managed implementation in class ZBP_TBL_AUDIT unique;
 strict ( 2 );
-
 define behavior for ZI_TBL_AUDIT alias AuditLog
 persistent table ztbl_audit
 lock master
 authorization master ( instance )
 etag master ChangedAt
 {
-
   field ( readonly ) AuditId;
   field ( readonly ) TableName;
   field ( readonly ) RecordKey;
@@ -17,9 +15,9 @@ etag master ChangedAt
   field ( readonly ) ChangedBy;
   field ( readonly ) ChangedAt;
   field ( readonly ) ActionType;
-
-  action rollback result [1] ZDT_CRUD_RESULT;
-
+  field ( readonly ) RollbackAuditId;
+  action ( features : instance ) rollback result [1] ZDT_CRUD_RESULT;
+  association _Items;
   mapping for ztbl_audit corresponding
   {
     AuditId    = audit_id;
@@ -30,6 +28,33 @@ etag master ChangedAt
     NewValue   = new_value;
     ChangedBy  = changed_by;
     ChangedAt  = changed_at;
+    ActionType = action_type;
+    RollbackAuditId = rollback_audit_id;
+  }
+}
+define behavior for ZI_TBL_AUDIT_ITEM alias AuditItem
+persistent table ztbl_audit_item
+lock dependent by _AuditLog
+authorization dependent by _AuditLog
+{
+  field ( readonly ) AuditId;
+  field ( readonly ) ItemNo;
+  field ( readonly ) TableName;
+  field ( readonly ) RecordKey;
+  field ( readonly ) FieldName;
+  field ( readonly ) OldValue;
+  field ( readonly ) NewValue;
+  field ( readonly ) ActionType;
+  association _AuditLog;
+  mapping for ztbl_audit_item corresponding
+  {
+    AuditId    = audit_id;
+    ItemNo     = item_no;
+    TableName  = table_name;
+    RecordKey  = record_key;
+    FieldName  = field_name;
+    OldValue   = old_value;
+    NewValue   = new_value;
     ActionType = action_type;
   }
 }
