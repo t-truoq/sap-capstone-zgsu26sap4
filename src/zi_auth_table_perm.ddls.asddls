@@ -1,7 +1,7 @@
 @AbapCatalog.viewEnhancementCategory: [#NONE]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Auth Admin - Table Permissions'
-@Metadata.ignorePropagatedAnnotations: true
+@Metadata.ignorePropagatedAnnotations: false
 define root view entity ZI_AUTH_TABLE_PERM
   as select from ztbl_table_perm
   association [0..1] to ztbl_user_master as _AdminAccess
@@ -14,7 +14,6 @@ define root view entity ZI_AUTH_TABLE_PERM
       can_create as CanCreate,
       can_update as CanUpdate,
       can_delete as CanDelete,
-      can_upload as CanUpload,
 
   @Consumption.hidden: true
   _AdminAccess

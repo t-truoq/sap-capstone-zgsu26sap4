@@ -1,4 +1,3 @@
-
 CLASS zcl_aprvl_util DEFINITION
 PUBLIC FINAL CREATE PUBLIC.
 PUBLIC SECTION.
@@ -110,7 +109,7 @@ METHOD submit_for_approval.
         IF sy-subrc <> 0.
           rs_result = VALUE #(
             success = abap_false
-            message = |Cannot create approval request for { iv_record_key }| ).
+            message = |Cannot create approval request for { iv_record_key }| ) ##NO_TEXT.
           RETURN.
         ENDIF.
 
@@ -124,13 +123,13 @@ METHOD submit_for_approval.
             status      = 'PENDING'
             new_data    = iv_new_data
             old_data    = iv_old_data
-            message     = 'Submitted from CRUD' ) ).
+            message     = 'Submitted from CRUD' ) ) ##NO_TEXT.
 
         IF sy-subrc <> 0.
           DELETE FROM ztbl_aprvl WHERE aprvl_id = @lv_aprvl_id.
           rs_result = VALUE #(
             success = abap_false
-            message = |Cannot create approval item for { iv_record_key }| ).
+            message = |Cannot create approval item for { iv_record_key }| ) ##NO_TEXT.
           RETURN.
         ENDIF.
 
@@ -138,7 +137,7 @@ METHOD submit_for_approval.
           success  = abap_true
           aprvl_id = lv_aprvl_id
           message  = |Request submitted for approval (ID: { lv_aprvl_id })|
-        ).
+        ) ##NO_TEXT.
 
       CATCH cx_root INTO DATA(lx).
         rs_result = VALUE #(
@@ -233,7 +232,7 @@ METHOD submit_for_approval.
     IF ls_pending-aprvl_id IS NOT INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
         EXPORTING
-          iv_text         = |Record đang chờ duyệt bởi { ls_pending-submitted_by }. Không thể tạo request mới.|
+          iv_text         = |Record đang chờ duyệt bởi { ls_pending-submitted_by }. Không thể tạo request mới.| ##NO_TEXT
           iv_submitted_by = ls_pending-submitted_by.
     ENDIF.
   ENDMETHOD.
@@ -265,7 +264,7 @@ METHOD submit_for_approval.
           status      = 'PENDING'
           new_data    = iv_new_data
           old_data    = iv_old_data
-          message     = 'Updated from CRUD' ) ).
+          message     = 'Updated from CRUD' ) ) ##NO_TEXT.
     ENDIF.
   ENDMETHOD.
 
@@ -293,7 +292,7 @@ METHOD check_and_submit.
       rs_result = VALUE #(
         needs_approval = abap_true
         aprvl_id       = ls_pending-aprvl_id
-        message        = |Đã cập nhật request đang chờ duyệt ({ ls_pending-aprvl_id })| ).
+        message        = |Đã cập nhật request đang chờ duyệt ({ ls_pending-aprvl_id })| ) ##NO_TEXT.
       RETURN.
     ENDIF.
 
@@ -325,14 +324,14 @@ METHOD log_change.
         IF sy-subrc <> 0.
           DATA(lv_parent_record_key) = COND ztde_record_key(
             WHEN lv_is_bulk = abap_true THEN 'BULK'
-            ELSE iv_record_key ).
+            ELSE iv_record_key ) ##NO_TEXT.
           DATA(lv_parent_field_name) = COND ztde_field_name(
             WHEN lv_is_bulk = abap_true THEN space
             ELSE iv_field_name ).
           DATA lv_parent_old_value TYPE ztbl_audit-old_value.
           DATA lv_parent_new_value TYPE ztbl_audit-new_value.
           IF lv_is_bulk = abap_true.
-            lv_parent_new_value = 'Bulk audit'.
+            lv_parent_new_value = 'Bulk audit' ##NO_TEXT.
           ELSE.
             lv_parent_old_value = iv_old_value.
             lv_parent_new_value = iv_new_value.
@@ -369,7 +368,7 @@ METHOD log_change.
             action_type = iv_action_type ) ).
 
         IF lv_is_bulk = abap_true.
-          DATA(lv_summary) = |Bulk audit: { lv_item_no } item(s)|.
+          DATA(lv_summary) = |Bulk audit: { lv_item_no } item(s)| ##NO_TEXT.
           UPDATE ztbl_audit
             SET new_value = @lv_summary
             WHERE audit_id = @lv_audit_id.
@@ -380,5 +379,3 @@ METHOD log_change.
   ENDMETHOD.
 
 ENDCLASS.
-
-

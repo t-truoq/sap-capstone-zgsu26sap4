@@ -16,7 +16,6 @@ CLASS-METHODS get_auth_by_status
         create TYPE char20 VALUE 'CREATE',
         update TYPE char20 VALUE 'UPDATE',
         delete TYPE char20 VALUE 'DELETE',
-        upload TYPE char20 VALUE 'UPLOAD',
       END OF c_action.
 
     CONSTANTS:
@@ -76,7 +75,6 @@ CLASS-METHODS sync_user
                 iv_can_create TYPE ztde_yesno
                 iv_can_update TYPE ztde_yesno
                 iv_can_delete TYPE ztde_yesno
-                iv_can_upload TYPE ztde_yesno
       RETURNING VALUE(rv_count) TYPE i.
 ENDCLASS.
 
@@ -112,68 +110,93 @@ METHOD get_auth_by_status.
       RETURN.
     ENDIF.
 
-    SELECT SINGLE can_view, can_create, can_update, can_delete, can_upload
+    SELECT SINGLE can_view, can_create, can_update, can_delete
       FROM ztbl_user_perm
       WHERE username   = @iv_username
         AND table_name = @iv_table_name
       INTO CORRESPONDING FIELDS OF @rs_perm.
-
-    IF sy-subrc <> 0.
-      rs_perm = get_table_permissions( iv_table_name = iv_table_name ).
-    ENDIF.
   ENDMETHOD.
 
   METHOD get_table_permissions.
-    SELECT SINGLE can_view, can_create, can_update, can_delete, can_upload
+    SELECT SINGLE can_view, can_create, can_update, can_delete
       FROM ztbl_table_perm
       WHERE table_name = @iv_table_name
       INTO CORRESPONDING FIELDS OF @rs_perm.
-
-    IF sy-subrc <> 0.
-      rs_perm-can_view   = abap_true.
-      rs_perm-can_create = abap_true.
-      rs_perm-can_update = abap_true.
-      rs_perm-can_delete = abap_true.
-      rs_perm-can_upload = abap_true.
-    ENDIF.
   ENDMETHOD.
 
   METHOD check_permission.
-    IF is_active_user( iv_username ) = abap_false.
+    SELECT SINGLE active_flag
+      FROM ztbl_user_master
+      WHERE username    = @iv_username
+        AND active_flag = @abap_true
+      INTO @DATA(lv_active_flag).
+
+    IF lv_active_flag <> abap_true.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |User { iv_username } không tồn tại hoặc không active trong ZTBL_USER_MASTER|.
+        EXPORTING iv_text = |User { iv_username } is not active|.
     ENDIF.
 
+    "An active table configuration is the mandatory global gate.
+    SELECT SINGLE @abap_true
+      FROM ztbl_config
+      WHERE table_name  = @iv_table_name
+        AND active_flag = @abap_true
+      INTO @DATA(lv_table_active).
+
+    IF lv_table_active <> abap_true.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Table { iv_table_name } is not active|.
+    ENDIF.
+
+    "ADMIN has full data permissions for every active configured table.
     IF is_admin( iv_username ) = abap_true.
       RETURN.
     ENDIF.
 
-    DATA(ls_perm) = get_user_permissions(
-      iv_username   = iv_username
+    SELECT SINGLE can_view, can_create, can_update, can_delete
+      FROM ztbl_user_perm
+      WHERE username   = @iv_username
+        AND table_name = @iv_table_name
+      INTO @DATA(ls_user_override).
+
+    IF sy-subrc = 0.
+      DATA(lv_user_allowed) = SWITCH abap_bool( iv_action
+        WHEN c_action-view   THEN ls_user_override-can_view
+        WHEN c_action-create THEN ls_user_override-can_create
+        WHEN c_action-update THEN ls_user_override-can_update
+        WHEN c_action-delete THEN ls_user_override-can_delete
+        ELSE abap_false ).
+
+      IF lv_user_allowed = abap_true.
+        RETURN.
+      ENDIF.
+
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |User { iv_username } is not allowed to { iv_action } on { iv_table_name }|.
+    ENDIF.
+
+    "No explicit user row: fall back to the table default policy.
+    DATA(ls_table_perm) = get_table_permissions(
       iv_table_name = iv_table_name ).
 
-    DATA(lv_allowed) = SWITCH abap_bool( iv_action
-      WHEN c_action-view   THEN ls_perm-can_view
-      WHEN c_action-create THEN ls_perm-can_create
-      WHEN c_action-update THEN ls_perm-can_update
-      WHEN c_action-delete THEN ls_perm-can_delete
-      WHEN c_action-upload THEN ls_perm-can_upload
+    DATA(lv_table_allowed) = SWITCH abap_bool( iv_action
+      WHEN c_action-view   THEN ls_table_perm-can_view
+      WHEN c_action-create THEN ls_table_perm-can_create
+      WHEN c_action-update THEN ls_table_perm-can_update
+      WHEN c_action-delete THEN ls_table_perm-can_delete
       ELSE abap_false ).
 
-    IF lv_allowed <> abap_true.
+    IF lv_table_allowed <> abap_true.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |User { iv_username } không có quyền { iv_action } trên { iv_table_name }|.
+        EXPORTING iv_text = |Table { iv_table_name } is not enabled for { iv_action }|.
     ENDIF.
   ENDMETHOD.
-
   METHOD check_admin_action.
     IF is_admin( iv_username ) = abap_false.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |Action { iv_action } chỉ dành cho ADMIN|.
+        EXPORTING iv_text = |Action { iv_action } is only allowed for ADMIN|.
     ENDIF.
-
   ENDMETHOD.
-
 METHOD sync_user.
     IF iv_username IS INITIAL.
       RETURN.
@@ -181,9 +204,6 @@ METHOD sync_user.
 
     IF iv_active_flag <> abap_true.
       DELETE FROM ztbl_user_perm
-        WHERE username = @iv_username.
-
-      DELETE FROM ztbl_admin_perm
         WHERE username = @iv_username.
       RETURN.
     ENDIF.
@@ -193,18 +213,7 @@ METHOD sync_user.
         DELETE FROM ztbl_user_perm
           WHERE username = @iv_username.
 
-        MODIFY ztbl_admin_perm FROM @( VALUE ztbl_admin_perm(
-          client           = sy-mandt
-          username         = iv_username
-          can_approve      = abap_true
-          can_rollback     = abap_true
-          can_config       = abap_true
-          can_force_unlock = abap_true ) ).
-
       WHEN 'USER'.
-        DELETE FROM ztbl_admin_perm
-          WHERE username = @iv_username.
-
         SELECT table_name
           FROM ztbl_config
           WHERE active_flag = @abap_true
@@ -214,7 +223,7 @@ METHOD sync_user.
           DATA(ls_policy) = zcl_auth_helper=>get_table_permissions(
             iv_table_name = ls_table-table_name ).
 
-          SELECT SINGLE can_view, can_create, can_update, can_delete, can_upload
+          SELECT SINGLE can_view, can_create, can_update, can_delete
             FROM ztbl_user_perm
             WHERE username   = @iv_username
               AND table_name = @ls_table-table_name
@@ -228,19 +237,20 @@ METHOD sync_user.
               can_view   = ls_policy-can_view
               can_create = ls_policy-can_create
               can_update = ls_policy-can_update
-              can_delete = ls_policy-can_delete
-              can_upload = ls_policy-can_upload ) ).
+              can_delete = ls_policy-can_delete ) ).
           ELSE.
-            " Existing user permissions are explicit overrides. Keep them
-            " when the table default changes.
+            UPDATE ztbl_user_perm
+              SET can_view   = @ls_policy-can_view,
+                  can_create = @ls_policy-can_create,
+                  can_update = @ls_policy-can_update,
+                  can_delete = @ls_policy-can_delete
+              WHERE username   = @iv_username
+                AND table_name = @ls_table-table_name.
           ENDIF.
         ENDLOOP.
 
       WHEN OTHERS.
         DELETE FROM ztbl_user_perm
-          WHERE username = @iv_username.
-
-        DELETE FROM ztbl_admin_perm
           WHERE username = @iv_username.
     ENDCASE.
   ENDMETHOD.
@@ -280,20 +290,6 @@ METHOD sync_user.
       ENDIF.
     ENDLOOP.
 
-    SELECT DISTINCT username
-      FROM ztbl_admin_perm
-      INTO TABLE @DATA(lt_admin_users).
-
-    LOOP AT lt_admin_users INTO DATA(ls_admin_user).
-      READ TABLE lt_users TRANSPORTING NO FIELDS
-        WITH KEY username = ls_admin_user-username
-                 active_flag = abap_true.
-      IF sy-subrc <> 0.
-        DELETE FROM ztbl_admin_perm
-          WHERE username = @ls_admin_user-username.
-      ENDIF.
-    ENDLOOP.
-
     LOOP AT lt_users INTO DATA(ls_user).
       sync_user(
         iv_username    = ls_user-username
@@ -317,8 +313,7 @@ METHOD sync_user.
       iv_can_view   = ls_policy-can_view
       iv_can_create = ls_policy-can_create
       iv_can_update = ls_policy-can_update
-      iv_can_delete = ls_policy-can_delete
-      iv_can_upload = ls_policy-can_upload ).
+      iv_can_delete = ls_policy-can_delete ).
   ENDMETHOD.
 
   METHOD apply_table_policy.
@@ -333,17 +328,33 @@ METHOD sync_user.
       INTO TABLE @DATA(lt_users).
 
     LOOP AT lt_users INTO DATA(ls_user).
-      MODIFY ztbl_user_perm FROM @( VALUE ztbl_user_perm(
-        client     = sy-mandt
-        username   = ls_user-username
-        table_name = iv_table_name
-        can_view   = iv_can_view
-        can_create = iv_can_create
-        can_update = iv_can_update
-        can_delete = iv_can_delete
-        can_upload = iv_can_upload ) ).
+      SELECT SINGLE @abap_true
+        FROM ztbl_user_perm
+        WHERE username   = @ls_user-username
+          AND table_name = @iv_table_name
+        INTO @DATA(lv_user_perm_exists).
+
+      IF lv_user_perm_exists = abap_true.
+        UPDATE ztbl_user_perm
+          SET can_view   = @iv_can_view,
+              can_create = @iv_can_create,
+              can_update = @iv_can_update,
+              can_delete = @iv_can_delete
+          WHERE username   = @ls_user-username
+            AND table_name = @iv_table_name.
+      ELSE.
+        INSERT ztbl_user_perm FROM @( VALUE ztbl_user_perm(
+          client     = sy-mandt
+          username   = ls_user-username
+          table_name = iv_table_name
+          can_view   = iv_can_view
+          can_create = iv_can_create
+          can_update = iv_can_update
+          can_delete = iv_can_delete ) ).
+      ENDIF.
 
       rv_count += 1.
+      CLEAR lv_user_perm_exists.
     ENDLOOP.
   ENDMETHOD.
 

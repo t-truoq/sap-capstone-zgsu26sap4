@@ -20,6 +20,5 @@ authorization master ( global )
     CanCreate = can_create;
     CanUpdate = can_update;
     CanDelete = can_delete;
-    CanUpload = can_upload;
   }
 }

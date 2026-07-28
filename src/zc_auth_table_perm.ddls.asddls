@@ -40,10 +40,6 @@ define root view entity ZC_AUTH_TABLE_PERM
   @UI.identification: [{ position: 50, label: 'Delete' }]
       CanDelete,
 
-  @UI.lineItem: [{ position: 60, label: 'Upload' }]
-  @UI.identification: [{ position: 60, label: 'Upload' }]
-      CanUpload,
-
   @Consumption.hidden: true
       _AdminAccess
 }

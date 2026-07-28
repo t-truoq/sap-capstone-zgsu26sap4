@@ -120,6 +120,12 @@ METHOD download_excel.
     CLEAR rs_res.
     rs_res-id = is_req-id.
 
+    IF it_diff_cds IS INITIAL.
+      rs_res-error_count = 1.
+      rs_res-message = 'No Excel diff rows were received for commit. Please preview the Excel file again before confirming import.'.
+      RETURN.
+    ENDIF.
+
     DATA(lt_diff) = diff_to_internal( it_diff_cds ).
 
     " Gọi committer trực tiếp (tránh trùng tên method confirm_import với facade/committer)
@@ -192,6 +198,17 @@ METHOD download_excel.
         /ui2/cl_json=>deserialize(
           EXPORTING json = iv_json
           CHANGING  data = rt_cds ).
+
+        IF NOT line_exists( rt_cds[ status = zcl_excel_types=>c_status-new ] )
+           AND NOT line_exists( rt_cds[ status = zcl_excel_types=>c_status-changed ] )
+           AND NOT line_exists( rt_cds[ status = zcl_excel_types=>c_status-delete ] )
+           AND iv_json CS 'fieldName'.
+          CLEAR rt_cds.
+          /ui2/cl_json=>deserialize(
+            EXPORTING json        = iv_json
+                      pretty_name = /ui2/cl_json=>pretty_mode-camel_case
+            CHANGING  data        = rt_cds ).
+        ENDIF.
       CATCH cx_root INTO DATA(lx).
         RAISE EXCEPTION TYPE zcx_excel_pipeline
           EXPORTING
@@ -240,4 +257,5 @@ METHOD download_excel_base64.
   ENDMETHOD.
 
 ENDCLASS.
+
 

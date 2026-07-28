@@ -2,6 +2,8 @@ CLASS lhc_tblconfig DEFINITION INHERITING FROM cl_abap_behavior_handler.
  PRIVATE SECTION.
 
  "── TblConfig handlers ──
+ METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION
+ IMPORTING REQUEST requested_authorizations FOR tblconfig RESULT result.
  METHODS get_instance_authorizations FOR INSTANCE AUTHORIZATION
  IMPORTING keys REQUEST requested_authorizations FOR tblconfig RESULT result.
  METHODS validatetablename FOR VALIDATE ON SAVE
@@ -12,6 +14,8 @@ CLASS lhc_tblconfig DEFINITION INHERITING FROM cl_abap_behavior_handler.
  IMPORTING keys FOR tblconfig~filldescription.
  METHODS fillfieldconfig FOR DETERMINE ON MODIFY
  IMPORTING keys FOR tblconfig~fillfieldconfig.
+ METHODS ensuretablepermission FOR DETERMINE ON SAVE
+ IMPORTING keys FOR tblconfig~ensuretablepermission.
 
  "── Dynamic CRUD actions ──
  METHODS getfieldmeta FOR MODIFY
@@ -65,6 +69,77 @@ ENDCLASS.
 
 CLASS lhc_tblconfig IMPLEMENTATION.
 
+ METHOD ensuretablepermission.
+     READ ENTITIES OF zi_tbl_config IN LOCAL MODE
+       ENTITY tblconfig
+       FIELDS ( tablename activeflag )
+       WITH CORRESPONDING #( keys )
+       RESULT DATA(lt_configs).
+
+   LOOP AT lt_configs INTO DATA(ls_config).
+     IF ls_config-tablename IS INITIAL.
+       CONTINUE.
+     ENDIF.
+
+     IF ls_config-activeflag <> abap_true.
+       DELETE FROM ztbl_table_perm
+         WHERE table_name = @ls_config-tablename.
+       DELETE FROM ztbl_user_perm
+         WHERE table_name = @ls_config-tablename.
+       CONTINUE.
+     ENDIF.
+
+     SELECT SINGLE table_name, can_view, can_create, can_update, can_delete
+     FROM ztbl_table_perm
+     WHERE table_name = @ls_config-tablename
+     INTO @DATA(ls_table_policy).
+
+     IF sy-subrc <> 0.
+       ls_table_policy = VALUE #(
+         table_name = ls_config-tablename
+         can_view   = abap_true
+         can_create = abap_true
+         can_update = abap_true
+         can_delete = abap_true ).
+
+       INSERT ztbl_table_perm FROM @( VALUE ztbl_table_perm(
+         client     = sy-mandt
+         table_name = ls_config-tablename
+         can_view   = abap_true
+         can_create = abap_true
+         can_update = abap_true
+         can_delete = abap_true ) ).
+     ENDIF.
+
+     "Every active USER must have an explicit row.  Authorization must not
+     "fall back to the table policy when a user-specific row is missing.
+     SELECT username
+       FROM ztbl_user_master
+       WHERE role_type   = 'USER'
+         AND active_flag = @abap_true
+       INTO TABLE @DATA(lt_users).
+
+     LOOP AT lt_users INTO DATA(ls_user).
+       SELECT SINGLE @abap_true
+         FROM ztbl_user_perm
+         WHERE username   = @ls_user-username
+           AND table_name = @ls_config-tablename
+         INTO @DATA(lv_user_perm_exists).
+
+       IF sy-subrc <> 0.
+         INSERT ztbl_user_perm FROM @( VALUE ztbl_user_perm(
+           client     = sy-mandt
+           username   = ls_user-username
+           table_name = ls_config-tablename
+           can_view   = ls_table_policy-can_view
+           can_create = ls_table_policy-can_create
+           can_update = ls_table_policy-can_update
+           can_delete = ls_table_policy-can_delete ) ).
+       ENDIF.
+     ENDLOOP.
+   ENDLOOP.
+ ENDMETHOD.
+
  METHOD validatedomainname.
  READ ENTITIES OF zi_tbl_config IN LOCAL MODE
  ENTITY fldconfig
@@ -90,6 +165,28 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ENDMETHOD.
 
  METHOD get_instance_authorizations.
+ DATA(lv_admin) = zcl_auth_helper=>is_admin( ).
+
+ LOOP AT keys INTO DATA(ls_key).
+   APPEND VALUE #(
+     %tky    = ls_key-%tky
+     %update = COND #( WHEN lv_admin = abap_true
+                       THEN if_abap_behv=>auth-allowed
+                       ELSE if_abap_behv=>auth-unauthorized )
+     %delete = COND #( WHEN lv_admin = abap_true
+                       THEN if_abap_behv=>auth-allowed
+                       ELSE if_abap_behv=>auth-unauthorized )
+   ) TO result.
+ ENDLOOP.
+ ENDMETHOD.
+
+ METHOD get_global_authorizations.
+   IF requested_authorizations-%create = if_abap_behv=>mk-on.
+     result-%create = COND #(
+       WHEN zcl_auth_helper=>is_admin( ) = abap_true
+       THEN if_abap_behv=>auth-allowed
+       ELSE if_abap_behv=>auth-unauthorized ).
+   ENDIF.
  ENDMETHOD.
 
  METHOD validatetablename.
@@ -284,6 +381,15 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  LOOP AT lt_batch_refs INTO DATA(lr_batch_record).
  DATA(lv_batch_item_no) = sy-tabix.
 
+ DATA(lv_batch_validation_msg) =
+   zcl_dyn_record_handler=>validate_record_values(
+     iv_table_name = ls_config-tablename
+     ir_record     = lr_batch_record ).
+ IF lv_batch_validation_msg IS NOT INITIAL.
+   RAISE EXCEPTION TYPE zcx_excel_pipeline
+     EXPORTING iv_text = |Row { lv_batch_item_no }: { lv_batch_validation_msg }|.
+ ENDIF.
+
  zcl_dyn_record_handler=>on_create(
  iv_table_name = ls_config-tablename
  ir_record     = lr_batch_record ).
@@ -393,6 +499,21 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  EXPORTING iv_json = lv_record_data
  CHANGING ca_record = lo_create
  ).
+
+ DATA(lv_create_validation_msg) =
+   zcl_dyn_record_handler=>validate_record_values(
+     iv_table_name = ls_config-tablename
+     ir_record     = lo_create ).
+ IF lv_create_validation_msg IS NOT INITIAL.
+   APPEND VALUE #(
+     %tky = ls_config-%tky
+     %param = VALUE #(
+       table_name = ls_config-tablename
+       success    = abap_false
+       message    = lv_create_validation_msg )
+   ) TO result.
+   CONTINUE.
+ ENDIF.
 
  zcl_dyn_record_handler=>on_create(
  iv_table_name = ls_config-tablename
@@ -528,6 +649,15 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  DATA lt_batch_items TYPE zcl_excel_bulk_aprvl=>tt_item.
  LOOP AT lt_batch_refs INTO DATA(lr_batch_record).
  DATA(lv_batch_item_no) = sy-tabix.
+
+ DATA(lv_batch_update_validation_msg) =
+   zcl_dyn_record_handler=>validate_record_values(
+     iv_table_name = ls_config-tablename
+     ir_record     = lr_batch_record ).
+ IF lv_batch_update_validation_msg IS NOT INITIAL.
+   RAISE EXCEPTION TYPE zcx_excel_pipeline
+     EXPORTING iv_text = |Row { lv_batch_item_no }: { lv_batch_update_validation_msg }|.
+ ENDIF.
 
  DATA(lt_batch_keys) = zcl_dyn_record_handler=>get_key_fields(
  iv_table_name = ls_config-tablename ).
@@ -671,6 +801,21 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  EXPORTING iv_json = lv_record_data
  CHANGING ca_record = lo_new
  ).
+
+ DATA(lv_update_validation_msg) =
+   zcl_dyn_record_handler=>validate_record_values(
+     iv_table_name = ls_config-tablename
+     ir_record     = lo_new ).
+ IF lv_update_validation_msg IS NOT INITIAL.
+   APPEND VALUE #(
+     %tky = ls_config-%tky
+     %param = VALUE #(
+       table_name = ls_config-tablename
+       success    = abap_false
+       message    = lv_update_validation_msg )
+   ) TO result.
+   CONTINUE.
+ ENDIF.
 
  DATA(lt_keys) = zcl_dyn_record_handler=>get_key_fields(
    iv_table_name = ls_config-tablename ).
