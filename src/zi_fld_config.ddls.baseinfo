@@ -1,7 +1,8 @@
 {
   "BASEINFO": {
     "FROM": [
-      "ZFLD_CONFIG"
+      "ZFLD_CONFIG",
+      "ZTBL_USER_MASTER"
     ],
     "ASSOCIATED": [
       "ZI_TBL_CONFIG"

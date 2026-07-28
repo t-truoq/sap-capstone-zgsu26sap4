@@ -4,6 +4,9 @@
 @Metadata.ignorePropagatedAnnotations: true
 define view entity ZI_FLD_CONFIG
   as select from zfld_config
+  association [0..1] to ztbl_user_master as _CurrentUser
+    on  _CurrentUser.username    = $session.user
+    and _CurrentUser.active_flag = 'X'
   association to parent ZI_TBL_CONFIG as _TblConfig
     on $projection.ConfigUuid = _TblConfig.ConfigUuid
 {
@@ -21,3 +24,4 @@ define view entity ZI_FLD_CONFIG
 
       _TblConfig
 }
+where _CurrentUser.active_flag = 'X'

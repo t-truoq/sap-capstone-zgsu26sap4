@@ -43,6 +43,15 @@ CONSTANTS c_action_field TYPE fieldname VALUE '__ACTION'.
                 it_cells           TYPE zcl_excel_types=>tt_cell
       RETURNING VALUE(rv_message)  TYPE string.
 
+    CLASS-METHODS is_fk_key_field
+      IMPORTING iv_table_name TYPE tabname
+                iv_field_name TYPE fieldname
+      RETURNING VALUE(rv_is_fk) TYPE abap_bool.
+
+    CLASS-METHODS is_valid_uuid_hex
+      IMPORTING iv_value          TYPE string
+      RETURNING VALUE(rv_is_valid) TYPE abap_bool.
+
     CLASS-METHODS append_new_diff
       IMPORTING iv_row_no     TYPE i
                 iv_table_name TYPE tabname
@@ -79,6 +88,14 @@ TYPES: BEGIN OF ty_group,
     CLASS-METHODS mark_preview_conflicts
       IMPORTING iv_table_name TYPE tabname
       CHANGING  ct_diff       TYPE zcl_excel_types=>tt_diff_row.
+
+    CLASS-METHODS mark_permission_skips
+      IMPORTING iv_table_name TYPE tabname
+      CHANGING  ct_diff       TYPE zcl_excel_types=>tt_diff_row.
+
+    CLASS-METHODS get_permission_action
+      IMPORTING iv_status        TYPE char10
+      RETURNING VALUE(rv_action) TYPE char20.
 
     CLASS-METHODS assert_no_pending_conflict
       IMPORTING iv_table_name TYPE ztde_table_name
@@ -134,7 +151,7 @@ METHOD build_diff.
                     iv_table_name = iv_table_name ).
     DATA(lv_eid_f) = zcl_excel_types=>get_entity_id_field( iv_table_name ).
 
-    IF lt_biz_keys IS INITIAL.
+    IF lt_biz_keys IS INITIAL AND lv_eid_f IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
         EXPORTING iv_text = |Table { iv_table_name } has no importable key field for Excel diff. | &&
                             |Set IS_KEY_FIELD = X for the business key in ZFLD_CONFIG.|.
@@ -153,11 +170,27 @@ METHOD build_diff.
         it_fields     = lt_fields
         it_cells      = ls_pre-cells ).
 
+      DATA(lv_skip_pre_dupcheck) = abap_false.
+      IF lv_eid_f IS NOT INITIAL
+         AND is_fk_key_field(
+               iv_table_name = iv_table_name
+               iv_field_name = lv_eid_f ) = abap_false.
+        READ TABLE ls_pre-cells INTO DATA(ls_pre_eid)
+          WITH KEY fieldname = lv_eid_f.
+        IF sy-subrc = 0 AND ls_pre_eid-value IS INITIAL.
+          lv_skip_pre_dupcheck = abap_true.
+        ENDIF.
+      ENDIF.
+
       IF get_key_problem(
            iv_table_name      = iv_table_name
            iv_entity_id_field = lv_eid_f
            it_biz_keys        = lt_biz_keys
            it_cells           = ls_pre-cells ) IS NOT INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_skip_pre_dupcheck = abap_true.
         CONTINUE.
       ENDIF.
 
@@ -170,6 +203,32 @@ METHOD build_diff.
     ENDLOOP.
 
     LOOP AT it_rows INTO DATA(ls_row).
+
+      DATA(lv_dupkey) = build_file_key(
+        iv_table_name = iv_table_name
+        it_fields     = lt_fields
+        it_cells      = ls_row-cells ).
+      DATA(lv_skip_dupcheck) = abap_false.
+
+      " Full-data export + new row: generate the technical ENTITY_ID before
+      " building the diff key. ITEM_ID remains a business/FK value and must
+      " never become the record key.
+      DATA(lv_generated_eid) = abap_false.
+      IF lv_eid_f IS NOT INITIAL
+         AND is_fk_key_field(
+               iv_table_name = iv_table_name
+               iv_field_name = lv_eid_f ) = abap_false.
+        READ TABLE ls_row-cells ASSIGNING FIELD-SYMBOL(<eid_cell>)
+          WITH KEY fieldname = lv_eid_f.
+        IF sy-subrc = 0 AND <eid_cell>-value IS INITIAL.
+          lv_skip_dupcheck = abap_true.
+          TRY.
+              <eid_cell>-value = cl_system_uuid=>create_uuid_c32_static( ).
+              lv_generated_eid = abap_true.
+            CATCH cx_uuid_error.
+          ENDTRY.
+        ENDIF.
+      ENDIF.
 
       DATA(lv_fkey) = build_file_key(
         iv_table_name = iv_table_name
@@ -191,8 +250,8 @@ METHOD build_diff.
         CONTINUE.
       ENDIF.
 
-      READ TABLE lt_kc INTO DATA(ls_kc) WITH KEY rkey = lv_fkey.
-      IF sy-subrc = 0 AND ls_kc-cnt > 1.
+      READ TABLE lt_kc INTO DATA(ls_kc) WITH KEY rkey = lv_dupkey.
+      IF lv_skip_dupcheck = abap_false AND sy-subrc = 0 AND ls_kc-cnt > 1.
         APPEND VALUE #( row_no     = ls_row-row_no
                         table_name = iv_table_name
                         record_key = lv_fkey
@@ -314,11 +373,29 @@ METHOD build_diff.
         it_cells      = ls_row-cells ).
 
       IF lv_where IS INITIAL.
-        APPEND VALUE #( row_no     = ls_row-row_no
-                        table_name = iv_table_name
-                        record_key = lv_fkey
-                        status     = zcl_excel_types=>c_status-error
-                        message    = |Cannot identify target record for table { iv_table_name }. Check key columns in the uploaded file.| ) TO rt_diff.
+        " A full export may contain an empty technical ENTITY_ID for a new
+        " row. Treat it as NEW; do not resolve the row by ITEM_ID alone.
+        DATA(lv_eid_present) = abap_false.
+        IF lv_eid_f IS NOT INITIAL.
+          READ TABLE ls_row-cells TRANSPORTING NO FIELDS
+            WITH KEY fieldname = lv_eid_f.
+          lv_eid_present = xsdbool( sy-subrc = 0 ).
+        ENDIF.
+        IF lv_eid_present = abap_true.
+          append_new_diff(
+            EXPORTING iv_row_no     = ls_row-row_no
+                      iv_table_name = iv_table_name
+                      iv_record_key = lv_fkey
+                      it_fields     = lt_fields
+                      it_cells      = ls_row-cells
+            CHANGING  ct_diff       = rt_diff ).
+        ELSE.
+          APPEND VALUE #( row_no     = ls_row-row_no
+                          table_name = iv_table_name
+                          record_key = lv_fkey
+                          status     = zcl_excel_types=>c_status-error
+                          message    = |Cannot identify target record for table { iv_table_name }. Check key columns in the uploaded file.| ) TO rt_diff.
+        ENDIF.
         CONTINUE.
       ENDIF.
 
@@ -342,7 +419,7 @@ METHOD build_diff.
       ENDTRY.
 
       IF lv_db_ok = abap_false.
-        IF lv_has_eid = abap_true.
+        IF lv_has_eid = abap_true AND lv_generated_eid = abap_false.
           APPEND VALUE #( row_no     = ls_row-row_no
                           table_name = iv_table_name
                           record_key = lv_fkey
@@ -366,21 +443,6 @@ METHOD build_diff.
         it_fields     = lt_fields
         ir_row        = lr_db ).
 
-      DATA(lv_collision) = zcl_excel_types=>check_business_key_collision(
-        iv_table_name = iv_table_name
-        it_fields     = lt_fields
-        ir_db_row     = lr_db
-        it_cells      = ls_row-cells ).
-
-      IF lv_collision IS NOT INITIAL.
-        APPEND VALUE #( row_no     = ls_row-row_no
-                        table_name = iv_table_name
-                        record_key = lv_rkey
-                        status     = zcl_excel_types=>c_status-error
-                        message    = lv_collision ) TO rt_diff.
-        CONTINUE.
-      ENDIF.
-
       DATA(lv_changed) = append_compare_diff(
         EXPORTING iv_row_no     = ls_row-row_no
                   iv_table_name = iv_table_name
@@ -403,6 +465,17 @@ METHOD build_diff.
     mark_preview_conflicts(
       EXPORTING iv_table_name = iv_table_name
       CHANGING  ct_diff       = rt_diff ).
+
+    mark_permission_skips(
+      EXPORTING iv_table_name = iv_table_name
+      CHANGING  ct_diff       = rt_diff ).
+
+    " An invalid upload must be corrected before it can be reviewed or
+    " committed. Keep only the error rows in that case; otherwise the
+    " preview still advertises valid rows as committable.
+    IF line_exists( rt_diff[ status = zcl_excel_types=>c_status-error ] ).
+      DELETE rt_diff WHERE status <> zcl_excel_types=>c_status-error.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -420,6 +493,20 @@ METHOD build_diff.
         it_cells = it_cells
         iv_field = iv_entity_id_field ).
       IF lv_eid IS NOT INITIAL.
+        IF is_valid_uuid_hex( lv_eid ) = abap_false.
+          rv_message = |Invalid { iv_entity_id_field } value '{ lv_eid }'. Upload a downloaded { iv_table_name } file or leave the technical key blank for new rows.|.
+          RETURN.
+        ENDIF.
+        RETURN.
+      ENDIF.
+
+      " ENTITY_ID is a parent/FK key for detail tables such as ZTST_ITEM.
+      " A partial key must never fall back to ITEM_ID (or another business
+      " key), otherwise a new row can be matched to an existing row.
+      IF is_fk_key_field(
+           iv_table_name = iv_table_name
+           iv_field_name = iv_entity_id_field ) = abap_true.
+        rv_message = |Missing foreign-key key value { iv_entity_id_field }. Select a valid parent value before import.| .
         RETURN.
       ENDIF.
     ENDIF.
@@ -428,6 +515,11 @@ METHOD build_diff.
     DATA lt_empty_values TYPE string_table.
 
     LOOP AT it_biz_keys INTO DATA(lv_key).
+      IF iv_entity_id_field IS NOT INITIAL
+         AND lv_key = CONV string( iv_entity_id_field ).
+        CONTINUE.
+      ENDIF.
+
       READ TABLE it_cells TRANSPORTING NO FIELDS
         WITH KEY fieldname = CONV fieldname( lv_key ).
 
@@ -456,6 +548,33 @@ METHOD build_diff.
       DATA(lv_empty) = concat_lines_of( table = lt_empty_values sep = ', ' ).
       rv_message = |Missing key value(s) for { lv_empty }. Fill the key column(s) before import.|.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD is_fk_key_field.
+    SELECT SINGLE @abap_true
+      FROM dd08l
+      INNER JOIN dd05s
+        ON  dd05s~tabname   = dd08l~tabname
+        AND dd05s~fieldname = dd08l~fieldname
+        AND dd05s~as4local  = dd08l~as4local
+      WHERE dd08l~tabname    = @iv_table_name
+        AND dd08l~as4local   = 'A'
+        AND dd05s~forkey     = @iv_field_name
+        AND dd08l~checktable IS NOT INITIAL
+      INTO @rv_is_fk.
+    IF sy-subrc <> 0.
+      rv_is_fk = abap_false.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD is_valid_uuid_hex.
+    DATA(lv_value) = iv_value.
+    CONDENSE lv_value NO-GAPS.
+    TRANSLATE lv_value TO UPPER CASE.
+
+    rv_is_valid = xsdbool(
+      strlen( lv_value ) = 32
+      AND lv_value CO '0123456789ABCDEF' ).
   ENDMETHOD.
 
 
@@ -556,16 +675,149 @@ METHOD build_diff.
         APPEND |Field { ls_field-field_name } exceeds max length { ls_field-leng }.| TO rt_errors.
       ENDIF.
 
+      IF ls_field-inttype = 'D'.
+        DATA(lv_date_text) = lv_val.
+        REPLACE ALL OCCURRENCES OF '-' IN lv_date_text WITH ''.
+
+        IF strlen( lv_date_text ) <> 8 OR lv_date_text CN '0123456789'.
+          APPEND |Field { ls_field-field_name } value '{ lv_val }' is not a valid date.| TO rt_errors.
+          CONTINUE.
+        ENDIF.
+
+        TRY.
+            DATA(lv_date) = CONV d( lv_date_text ).
+            DATA(lv_checked_date) = lv_date + 0.
+          CATCH cx_root.
+            APPEND |Field { ls_field-field_name } value '{ lv_val }' is not a valid date.| TO rt_errors.
+            CONTINUE.
+        ENDTRY.
+      ENDIF.
+
       IF ls_field-domain_name IS NOT INITIAL.
-        DATA(lt_vals) = zcl_table_inspector=>get_domain_values( ls_field-domain_name ).
-        IF lt_vals IS NOT INITIAL.
-          READ TABLE lt_vals TRANSPORTING NO FIELDS WITH KEY value = lv_val.
-          IF sy-subrc <> 0.
-            APPEND |Field { ls_field-field_name } value '{ lv_val }' is not allowed by domain { ls_field-domain_name }.| TO rt_errors.
+        DATA lv_has_fixed_domain_values TYPE abap_bool.
+        CLEAR lv_has_fixed_domain_values.
+
+        SELECT SINGLE @abap_true
+          FROM dd07l
+          WHERE domname    = @ls_field-domain_name
+            AND as4local   = 'A'
+            AND domvalue_l <> @space
+          INTO @lv_has_fixed_domain_values.
+
+        IF lv_has_fixed_domain_values = abap_true.
+          DATA(lt_vals) = zcl_table_inspector=>get_domain_values( ls_field-domain_name ).
+          IF lt_vals IS NOT INITIAL.
+            READ TABLE lt_vals TRANSPORTING NO FIELDS WITH KEY value = lv_val.
+            IF sy-subrc <> 0.
+              APPEND |Field { ls_field-field_name } value '{ lv_val }' is not allowed by domain { ls_field-domain_name }.| TO rt_errors.
+            ENDIF.
           ENDIF.
         ENDIF.
       ENDIF.
+
+      DATA lv_fk_table TYPE tabname.
+      DATA lv_fk_field TYPE fieldname.
+      CLEAR: lv_fk_table, lv_fk_field.
+
+      SELECT SINGLE dd08l~checktable, dd05s~fieldname
+        FROM dd08l
+        INNER JOIN dd05s
+          ON  dd05s~tabname   = dd08l~tabname
+          AND dd05s~fieldname = dd08l~fieldname
+          AND dd05s~as4local  = dd08l~as4local
+        WHERE dd08l~tabname    = @iv_table_name
+          AND dd08l~as4local   = 'A'
+          AND dd08l~checktable IS NOT INITIAL
+          AND dd05s~forkey     = @ls_field-field_name
+        INTO (@lv_fk_table, @lv_fk_field).
+
+      IF sy-subrc <> 0 AND ls_field-domain_name IS NOT INITIAL.
+        SELECT SINGLE entitytab
+          FROM dd01l
+          WHERE domname  = @ls_field-domain_name
+            AND as4local = 'A'
+            AND entitytab IS NOT INITIAL
+          INTO @lv_fk_table.
+
+        IF sy-subrc = 0 AND lv_fk_table IS NOT INITIAL.
+          SELECT SINGLE dd03l~fieldname
+            FROM dd03l
+            INNER JOIN dd04l
+              ON  dd04l~rollname = dd03l~rollname
+              AND dd04l~as4local = dd03l~as4local
+            WHERE dd03l~tabname   = @lv_fk_table
+              AND dd03l~keyflag   = 'X'
+              AND dd03l~as4local  = 'A'
+              AND dd03l~fieldname <> 'MANDT'
+              AND dd04l~domname   = @ls_field-domain_name
+            INTO @lv_fk_field.
+
+          IF sy-subrc <> 0.
+            SELECT SINGLE fieldname
+              FROM dd03l
+              WHERE tabname   = @lv_fk_table
+                AND keyflag   = 'X'
+                AND as4local  = 'A'
+                AND fieldname <> 'MANDT'
+              INTO @lv_fk_field.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
+      IF sy-subrc = 0 AND lv_fk_table IS NOT INITIAL AND lv_fk_field IS NOT INITIAL.
+        DATA(lv_fk_value) = lv_val.
+        DATA(lv_check_msg_field) = CONV string( ls_field-field_name ).
+        SELECT SINGLE leng, inttype
+          FROM dd03l
+          WHERE tabname   = @lv_fk_table
+            AND fieldname = @lv_fk_field
+            AND as4local  = 'A'
+          INTO @DATA(ls_fk_dd03l).
+        IF sy-subrc = 0.
+          IF ls_fk_dd03l-leng > 0 AND strlen( lv_fk_value ) > ls_fk_dd03l-leng.
+            APPEND |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| TO rt_errors.
+            CONTINUE.
+          ENDIF.
+          IF ( ls_fk_dd03l-inttype = 'N' OR ls_fk_dd03l-inttype = 'I' )
+             AND lv_fk_value CN '0123456789'.
+            APPEND |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| TO rt_errors.
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+        REPLACE ALL OCCURRENCES OF |'| IN lv_fk_value WITH |''|.
+        DATA(lv_fk_where) = |{ lv_fk_field } = '{ lv_fk_value }'|.
+        DATA(lv_fk_exists) = abap_false.
+        TRY.
+            SELECT SINGLE @abap_true
+              FROM (lv_fk_table)
+              WHERE (lv_fk_where)
+              INTO @lv_fk_exists.
+          CATCH cx_root.
+            CLEAR lv_fk_exists.
+        ENDTRY.
+        IF lv_fk_exists = abap_false.
+          APPEND |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| TO rt_errors.
+        ENDIF.
+      ENDIF.
     ENDLOOP.
+
+    DATA(lv_valid_from) = zcl_excel_types=>get_cell_value(
+      it_cells = it_cells
+      iv_field = 'VALID_FROM' ).
+    DATA(lv_valid_to) = zcl_excel_types=>get_cell_value(
+      it_cells = it_cells
+      iv_field = 'VALID_TO' ).
+    IF lv_valid_from IS NOT INITIAL AND lv_valid_to IS NOT INITIAL.
+      REPLACE ALL OCCURRENCES OF '-' IN lv_valid_from WITH ''.
+      REPLACE ALL OCCURRENCES OF '-' IN lv_valid_to WITH ''.
+      IF strlen( lv_valid_from ) = 8
+         AND strlen( lv_valid_to ) = 8
+         AND lv_valid_from CO '0123456789'
+         AND lv_valid_to CO '0123456789'
+         AND lv_valid_to < lv_valid_from.
+        APPEND |VALID_TO must be on or after VALID_FROM.| TO rt_errors.
+      ENDIF.
+    ENDIF.
   ENDMETHOD.
 
 METHOD confirm_import.
@@ -597,6 +849,14 @@ METHOD confirm_import.
     DATA lt_groups TYPE tt_group.
     DATA(lt_fields) = zcl_table_inspector=>get_field_list( iv_table_name ).
     DATA lt_error_groups TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
+    DATA lv_action_row_count TYPE i.
+
+    LOOP AT it_diff TRANSPORTING NO FIELDS
+      WHERE status = zcl_excel_types=>c_status-new
+         OR status = zcl_excel_types=>c_status-changed
+         OR status = zcl_excel_types=>c_status-delete.
+      lv_action_row_count = lv_action_row_count + 1.
+    ENDLOOP.
 
     LOOP AT it_diff INTO DATA(ls_error_diff)
       WHERE status = zcl_excel_types=>c_status-error.
@@ -651,8 +911,37 @@ METHOD confirm_import.
           WHEN ls_diff-status = zcl_excel_types=>c_status-delete
             OR ls_diff-fieldname = c_snapshot_field
           THEN ls_diff-old_value
-          ELSE ls_diff-new_value ) ) TO <g>-cells.
+        ELSE ls_diff-new_value ) ) TO <g>-cells.
     ENDLOOP.
+
+    " Re-check C/U/D permissions on the server. The preview can be stale or
+    " tampered with, so only authorized groups may be committed/submitted.
+    DATA lt_authorized_groups TYPE tt_group.
+    LOOP AT lt_groups INTO DATA(ls_permission_group).
+      DATA(lv_permission_action) =
+        get_permission_action( ls_permission_group-status ).
+      TRY.
+          zcl_auth_helper=>check_permission(
+            iv_table_name = CONV ztde_table_name( iv_table_name )
+            iv_action     = lv_permission_action ).
+          INSERT ls_permission_group INTO TABLE lt_authorized_groups.
+        CATCH zcx_excel_pipeline INTO DATA(lx_permission).
+          rs_summary-skipped_count = rs_summary-skipped_count + 1.
+          APPEND |Row { ls_permission_group-row_no } skipped: { lx_permission->get_text( ) }|
+            TO rs_summary-messages.
+      ENDTRY.
+    ENDLOOP.
+    lt_groups = lt_authorized_groups.
+
+    IF lt_groups IS INITIAL.
+      rs_summary-error_count = rs_summary-error_count + 1.
+      IF lv_action_row_count > 0.
+        APPEND 'Excel diff rows were received, but no commit groups could be built. Please preview the Excel file again and confirm with the latest diff.' TO rs_summary-messages.
+      ELSE.
+        APPEND 'No NEW/CHANGED/DELETE rows were received for commit. Please preview the Excel file again before confirming import.' TO rs_summary-messages.
+      ENDIF.
+      RETURN.
+    ENDIF.
 
     IF lt_groups IS INITIAL.
       APPEND 'Không có dòng NEW/CHANGED/DELETE để commit.' TO rs_summary-messages.
@@ -665,7 +954,8 @@ METHOD confirm_import.
                 it_fields     = lt_fields
                 iv_table_name = iv_table_name ).
 
-    IF lt_keys IS INITIAL.
+    DATA(lv_commit_eid_f) = zcl_excel_types=>get_entity_id_field( iv_table_name ).
+    IF lt_keys IS INITIAL AND lv_commit_eid_f IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
         EXPORTING iv_text = |Table { iv_table_name } không có key field importable để commit|.
     ENDIF.
@@ -678,6 +968,11 @@ METHOD confirm_import.
                   it_groups     = lt_aprvl_groups
                   it_fields     = lt_fields
         CHANGING  cs_summary    = rs_summary ).
+
+      IF rs_summary-inserted_count = 0 AND rs_summary-updated_count = 0.
+        APPEND 'No valid Excel rows were submitted for approval.' TO rs_summary-messages.
+        RETURN.
+      ENDIF.
 
       IF iv_do_commit = abap_true.
         COMMIT WORK AND WAIT.
@@ -1024,7 +1319,7 @@ METHOD confirm_import.
           IF lv_action = zcl_excel_types=>c_action-create.
             cs_summary-inserted_count = cs_summary-inserted_count + 1.
           ELSEIF lv_action = zcl_excel_types=>c_action-update.
-            cs_summary-updated_count = cs_summary-updated_count + lines( ls_group-cells ).
+            cs_summary-updated_count = cs_summary-updated_count + 1.
           ELSE.
             cs_summary-updated_count = cs_summary-updated_count + 1.
           ENDIF.
@@ -1088,6 +1383,46 @@ METHOD confirm_import.
           ENDLOOP.
       ENDTRY.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD mark_permission_skips.
+    DATA lt_seen TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
+
+    LOOP AT ct_diff INTO DATA(ls_diff)
+      WHERE status = zcl_excel_types=>c_status-new
+         OR status = zcl_excel_types=>c_status-changed
+         OR status = zcl_excel_types=>c_status-delete.
+      DATA(lv_group_key) =
+        |{ ls_diff-row_no }#{ ls_diff-record_key }#{ ls_diff-status }|.
+      INSERT lv_group_key INTO TABLE lt_seen.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_action) = get_permission_action( ls_diff-status ).
+      TRY.
+          zcl_auth_helper=>check_permission(
+            iv_table_name = CONV ztde_table_name( iv_table_name )
+            iv_action     = lv_action ).
+        CATCH zcx_excel_pipeline INTO DATA(lx_permission).
+          LOOP AT ct_diff ASSIGNING FIELD-SYMBOL(<permission_diff>)
+            WHERE row_no     = ls_diff-row_no
+              AND record_key = ls_diff-record_key
+              AND status     = ls_diff-status.
+            <permission_diff>-status  = zcl_excel_types=>c_status-skipped.
+            <permission_diff>-message = lx_permission->get_text( ).
+          ENDLOOP.
+      ENDTRY.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD get_permission_action.
+    rv_action = SWITCH char20(
+      iv_status
+      WHEN zcl_excel_types=>c_status-new     THEN zcl_auth_helper=>c_action-create
+      WHEN zcl_excel_types=>c_status-changed THEN zcl_auth_helper=>c_action-update
+      WHEN zcl_excel_types=>c_status-delete THEN zcl_auth_helper=>c_action-delete
+      ELSE '' ).
   ENDMETHOD.
 
   METHOD assert_no_pending_conflict.

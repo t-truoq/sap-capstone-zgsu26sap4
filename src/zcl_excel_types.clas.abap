@@ -182,13 +182,6 @@ CLASS-METHODS build_where_from_record_key
                 er_record     TYPE REF TO data
       RAISING   zcx_excel_pipeline.
 
-    CLASS-METHODS check_business_key_collision
-      IMPORTING iv_table_name TYPE tabname
-                it_fields     TYPE zcl_table_inspector=>tt_field_info
-                ir_db_row     TYPE REF TO data
-                it_cells      TYPE zcl_excel_types=>tt_cell
-      RETURNING VALUE(rv_error) TYPE string.
-
     "! Deserialize new_data ngược lại struct — bắt lỗi tên field JSON ≠ DDIC trước khi gửi duyệt.
     CLASS-METHODS validate_approval_json
       IMPORTING iv_table_name TYPE tabname
@@ -358,11 +351,13 @@ METHOD is_admin_field.
     CLEAR rt_keys.
 
     " Ưu tiên business key từ ZFLD_CONFIG (is_key_field + importable)
+    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
+
     LOOP AT it_fields INTO DATA(ls_field).
       IF is_config_flag( ls_field-is_key_field ) = abap_false.
         CONTINUE.
       ENDIF.
-      IF is_importable_field_info( ls_field ) = abap_false.
+      IF lv_eid_f IS NOT INITIAL AND ls_field-field_name = lv_eid_f.
         CONTINUE.
       ENDIF.
       IF ls_field-field_name = 'MANDT' OR ls_field-field_name = 'CLIENT'.
@@ -375,58 +370,7 @@ METHOD is_admin_field.
       RETURN.
     ENDIF.
 
-    " Fallback 2: DDIC key fields còn importable theo config
-    DATA(lt_ddic) = zcl_dyn_record_handler=>get_key_fields( iv_table_name ).
-    LOOP AT lt_ddic INTO DATA(lv_k).
-      IF lv_k = 'MANDT' OR lv_k = 'CLIENT'.
-        CONTINUE.
-      ENDIF.
-      READ TABLE it_fields INTO ls_field WITH KEY field_name = lv_k.
-      IF sy-subrc <> 0.
-        APPEND lv_k TO rt_keys.
-        CONTINUE.
-      ENDIF.
-      IF is_importable_field_info( ls_field ) = abap_true.
-        APPEND lv_k TO rt_keys.
-      ENDIF.
-    ENDLOOP.
-
-    IF rt_keys IS NOT INITIAL.
-      RETURN.
-    ENDIF.
-
-    " Fallback 3: mandatory + importable (business code, vd PRODUCT) khi chưa set is_key_field
-    LOOP AT it_fields INTO ls_field.
-      IF is_config_flag( ls_field-mandatory_flag ) = abap_false.
-        CONTINUE.
-      ENDIF.
-      IF is_importable_field_info( ls_field ) = abap_false.
-        CONTINUE.
-      ENDIF.
-      IF ls_field-field_name = 'MANDT' OR ls_field-field_name = 'CLIENT'.
-        CONTINUE.
-      ENDIF.
-      APPEND CONV string( ls_field-field_name ) TO rt_keys.
-    ENDLOOP.
-
-    IF rt_keys IS NOT INITIAL.
-      RETURN.
-    ENDIF.
-
-    " Fallback 4: field mã nghiệp vụ phổ biến (PRODUCT, CODE, …)
-    LOOP AT it_fields INTO ls_field.
-      DATA(lv_fn) = ls_field-field_name.
-      TRANSLATE lv_fn TO UPPER CASE.
-      IF lv_fn = 'PRODUCT'
-        OR lv_fn = 'PRODUCT_CATEGORY'
-        OR lv_fn CP 'PRODUCT_*'
-        OR lv_fn CP '*_CODE'
-        OR lv_fn = 'CODE'.
-        IF is_importable_field_info( ls_field ) = abap_true.
-          APPEND CONV string( ls_field-field_name ) TO rt_keys.
-        ENDIF.
-      ENDIF.
-    ENDLOOP.
+    RETURN.
   ENDMETHOD.
 
 
@@ -598,6 +542,15 @@ METHOD is_admin_field.
         rv_where = |{ lv_eid_f } = '{ lv_eid }'|.
         RETURN.
       ENDIF.
+
+      " Full-data exports contain ENTITY_ID even for a newly added row.
+      " An empty technical UUID means NEW; never fall back to ITEM_ID and
+      " accidentally match an existing detail row.
+      READ TABLE it_cells TRANSPORTING NO FIELDS
+        WITH KEY fieldname = lv_eid_f.
+      IF sy-subrc = 0.
+        RETURN.
+      ENDIF.
     ENDIF.
 
     DATA(lt_keys) = get_match_key_fields(
@@ -727,6 +680,21 @@ METHOD apply_cells_to_record.
     ASSIGN er_record->* TO FIELD-SYMBOL(<wa>).
     DATA lr_db TYPE REF TO data.
 
+    IF iv_status = zcl_excel_types=>c_status-new
+       AND iv_record_key IS NOT INITIAL.
+      " Preserve the technical key generated during preview. Otherwise
+      " on_create would generate another ENTITY_ID and the preview key would
+      " not identify the committed record.
+      TRY.
+          zcl_dyn_record_handler=>deserialize(
+            EXPORTING iv_json   = iv_record_key
+            CHANGING  ca_record = er_record ).
+        CATCH cx_root INTO DATA(lx_new_key).
+          RAISE EXCEPTION TYPE zcx_excel_pipeline
+            EXPORTING iv_text = |Invalid generated record key: { lx_new_key->get_text( ) }|.
+      ENDTRY.
+    ENDIF.
+
     IF iv_status = zcl_excel_types=>c_status-changed.
       DATA(lv_where) = build_where_from_record_key(
         iv_table_name = iv_table_name
@@ -775,63 +743,6 @@ METHOD apply_cells_to_record.
     ENDIF.
   ENDMETHOD.
 
-
-  METHOD check_business_key_collision.
-    DATA(lv_eid_f) = zcl_excel_types=>get_entity_id_field( iv_table_name ).
-    IF lv_eid_f IS INITIAL OR ir_db_row IS NOT BOUND.
-      RETURN.
-    ENDIF.
-
-    ASSIGN ir_db_row->* TO FIELD-SYMBOL(<db>).
-    ASSIGN COMPONENT lv_eid_f OF STRUCTURE <db> TO FIELD-SYMBOL(<db_eid>).
-    IF sy-subrc <> 0 OR <db_eid> IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    DATA(lt_biz) = zcl_excel_types=>get_match_key_fields(
-      it_fields     = it_fields
-      iv_table_name = iv_table_name ).
-
-    LOOP AT lt_biz INTO DATA(lv_bk).
-      DATA(lv_new) = zcl_excel_types=>get_cell_value(
-        it_cells = it_cells iv_field = CONV #( lv_bk ) ).
-      IF lv_new IS INITIAL.
-        CONTINUE.
-      ENDIF.
-
-      ASSIGN COMPONENT lv_bk OF STRUCTURE <db> TO FIELD-SYMBOL(<db_bk>).
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
-      DATA(lv_old) = |{ <db_bk> }|.
-      CONDENSE lv_old.
-      DATA(lv_new_c) = lv_new.
-      CONDENSE lv_new_c.
-      IF lv_old = lv_new_c.
-        CONTINUE.
-      ENDIF.
-
-      REPLACE ALL OCCURRENCES OF |'| IN lv_new WITH |''|.
-      DATA(lv_eid_esc) = |{ <db_eid> }|.
-      REPLACE ALL OCCURRENCES OF |'| IN lv_eid_esc WITH |''|.
-      DATA(lv_where) = |{ lv_bk } = '{ lv_new }' AND { lv_eid_f } <> '{ lv_eid_esc }'|.
-
-      TRY.
-          DATA(lr_hit) = zcl_dyn_record_handler=>get_table_data(
-                           iv_table_name   = iv_table_name
-                           iv_where_clause = lv_where
-                           iv_max_rows     = 1 ).
-          FIELD-SYMBOLS <tab> TYPE STANDARD TABLE.
-          ASSIGN lr_hit->* TO <tab>.
-          IF <tab> IS ASSIGNED AND lines( <tab> ) > 0.
-            rv_error = |Field { lv_bk } giá trị '{ lv_new }' đã thuộc bản ghi khác (trùng mã nghiệp vụ)|.
-            RETURN.
-          ENDIF.
-        CATCH cx_sy_dynamic_osql_error.
-          CONTINUE.
-      ENDTRY.
-    ENDLOOP.
-  ENDMETHOD.
 METHOD append_json_field.
     IF iv_quote = abap_true.
       DATA(lv_esc) = iv_value.
@@ -955,6 +866,30 @@ METHOD append_json_field.
 
 
   METHOD serialize_new_for_approval.
+    CLEAR rv_json.
+    DATA lv_first TYPE abap_bool VALUE abap_true.
+    DATA lt_seen TYPE string_table.
+    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
+
+    LOOP AT it_fields INTO DATA(ls_field).
+      IF is_admin_field( ls_field-field_name ) = abap_true
+         AND ls_field-field_name <> lv_eid_f.
+        CONTINUE.
+      ENDIF.
+
+      append_field_to_approval_json(
+        EXPORTING iv_table_name = iv_table_name
+                  is_field      = ls_field
+                  it_fields     = it_fields
+                  it_cells      = it_cells
+                  ir_record     = ir_record
+        CHANGING  cv_json       = rv_json
+                  cv_first      = lv_first
+                  ct_seen       = lt_seen ).
+    ENDLOOP.
+
+    rv_json = '{' && rv_json && '}'.
+    RETURN.
     " ZBP trên SAP không gọi apply_admin_on_insert → CREATED_AT (TIMESTAMPL) phải có trong JSON.
     " Chỉ bỏ admin timestamp kiểu UTCLONG (int8): /ui2/cl_json không round-trip → CX_SY_CONVERSION_NO_DATE_TIME.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<wa>).
@@ -1036,4 +971,5 @@ METHOD append_json_field.
   ENDMETHOD.
 
 ENDCLASS.
+
 

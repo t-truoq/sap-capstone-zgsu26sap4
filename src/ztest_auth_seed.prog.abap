@@ -43,11 +43,11 @@ START-OF-SELECTION.
   APPEND VALUE ztbl_user_perm(
     username = 'DEV-213' table_name = 'Z251_SCHEDULE'
     can_view = 'X' can_create = 'X' can_update = 'X'
-    can_delete = '' can_upload = 'X' ) TO lt_perm.
+    can_delete = '' can_upload = abap_false ) TO lt_perm.
   APPEND VALUE ztbl_user_perm(
     username = 'DEV-213' table_name = 'Z253_CAT'
     can_view = 'X' can_create = '' can_update = ''
-    can_delete = '' can_upload = 'X' ) TO lt_perm.
+    can_delete = '' can_upload = abap_false ) TO lt_perm.
   INSERT ztbl_user_perm FROM TABLE @lt_perm.
 
   " --- ZTBL_ADMIN_PERM ---

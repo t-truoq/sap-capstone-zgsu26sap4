@@ -44,9 +44,6 @@ define root view entity ZC_AUTH_USER_PERM
 
   @UI.lineItem: [{ position: 60, label: 'Delete' }]
   @UI.identification: [{ position: 60, label: 'Delete' }]
-      CanDelete,
+      CanDelete
 
-  @UI.lineItem: [{ position: 70, label: 'Upload' }]
-  @UI.identification: [{ position: 70, label: 'Upload' }]
-      CanUpload
 }

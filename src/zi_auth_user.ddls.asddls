@@ -10,7 +10,16 @@ define root view entity ZI_AUTH_USER
     and _CurrentUser.active_flag = 'X'
 {
   key username    as Username,
+
+      @Consumption.valueHelpDefinition: [{
+        entity: {
+          name: 'ZI_AUTH_ROLE_VH',
+          element: 'RoleType'
+        },
+        useForValidation: true
+      }]
       role_type   as RoleType,
+
       active_flag as ActiveFlag
 }
 where _CurrentUser.active_flag = 'X'

@@ -144,6 +144,12 @@ CLASS-METHODS on_create
         iv_table_name TYPE tabname
         ir_record     TYPE REF TO data
       RETURNING VALUE(rt_errors) TYPE tt_validation_errors.
+
+    CLASS-METHODS validate_record_values
+      IMPORTING
+        iv_table_name TYPE tabname
+        ir_record     TYPE REF TO data
+      RETURNING VALUE(rv_message) TYPE string.
 PRIVATE SECTION.
 CLASS-METHODS serialize_struct
       IMPORTING ia_struct      TYPE any
@@ -197,6 +203,7 @@ CLASS-METHODS fill_client
     TYPES:
       BEGIN OF ty_check_info,
         checktable TYPE tabname,
+        checkfield TYPE fieldname,
         has_fixed  TYPE abap_bool,
       END OF ty_check_info.
 
@@ -1259,6 +1266,8 @@ METHOD build_where_clause.
       RETURN.
     ENDIF.
 
+    DATA lv_config_domain TYPE dd03l-domname.
+
     LOOP AT lo_desc->get_components( ) INTO DATA(ls_component).
       IF ls_component-name = 'MANDT' OR ls_component-name = 'CLIENT'.
         CONTINUE.
@@ -1272,26 +1281,93 @@ METHOD build_where_clause.
       DATA(lv_value) = |{ <value> }|.
       CONDENSE lv_value.
       DATA(lv_fieldname) = CONV fieldname( ls_component-name ).
+
+      "Use the same configured-domain value source as Excel review.
+      CLEAR lv_config_domain.
+      SELECT SINGLE domain_name
+        FROM zfld_config
+        WHERE table_name = @iv_table_name
+          AND field_name = @lv_fieldname
+        INTO @lv_config_domain.
+
+      IF lv_config_domain IS NOT INITIAL.
+        DATA lv_config_has_fixed_values TYPE abap_bool.
+        CLEAR lv_config_has_fixed_values.
+
+        SELECT SINGLE @abap_true
+          FROM dd07l
+          WHERE domname    = @lv_config_domain
+            AND as4local   = 'A'
+            AND domvalue_l <> @space
+          INTO @lv_config_has_fixed_values.
+
+        IF lv_config_has_fixed_values = abap_true.
+          DATA(lt_allowed_values) =
+            zcl_table_inspector=>get_domain_values( lv_config_domain ).
+
+          IF lt_allowed_values IS NOT INITIAL.
+            READ TABLE lt_allowed_values TRANSPORTING NO FIELDS
+              WITH KEY value = lv_value.
+            IF sy-subrc <> 0.
+              APPEND VALUE #(
+                fieldname = lv_fieldname
+                value     = lv_value
+                message   = |Field { lv_fieldname } value '{ lv_value }' is not allowed by domain { lv_config_domain }.| )
+                TO rt_errors.
+            ENDIF.
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
       DATA(ls_check) = get_domain_check_info(
         iv_table_name = iv_table_name
         iv_fieldname  = lv_fieldname ).
 
-      IF ls_check-checktable IS NOT INITIAL.
+      IF ls_check-checktable IS NOT INITIAL AND ls_check-checkfield IS NOT INITIAL.
         DATA(lv_exists) = abap_false.
-        DATA(lv_where) = |{ lv_fieldname } = '{ lv_value }'|.
+        DATA(lv_fk_value) = lv_value.
+        DATA(lv_check_msg_field) = CONV string( lv_fieldname ).
+        SELECT SINGLE leng, inttype
+          FROM dd03l
+          WHERE tabname   = @ls_check-checktable
+            AND fieldname = @ls_check-checkfield
+            AND as4local  = 'A'
+          INTO @DATA(ls_fk_dd03l).
+        IF sy-subrc = 0.
+          IF ls_fk_dd03l-leng > 0 AND strlen( lv_fk_value ) > ls_fk_dd03l-leng.
+            APPEND VALUE #(
+              fieldname = lv_fieldname
+              value     = lv_value
+              message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
+              TO rt_errors.
+            CONTINUE.
+          ENDIF.
+          IF ( ls_fk_dd03l-inttype = 'N' OR ls_fk_dd03l-inttype = 'I' )
+             AND lv_fk_value CN '0123456789'.
+            APPEND VALUE #(
+              fieldname = lv_fieldname
+              value     = lv_value
+              message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
+              TO rt_errors.
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+        REPLACE ALL OCCURRENCES OF |'| IN lv_fk_value WITH |''|.
+        DATA(lv_where) = |{ ls_check-checkfield } = '{ lv_fk_value }'|.
         TRY.
             SELECT SINGLE @abap_true
               FROM (ls_check-checktable)
               WHERE (lv_where)
               INTO @lv_exists.
-          CATCH cx_sy_dynamic_osql_error.
-            CONTINUE.
+          CATCH cx_root.
+            CLEAR lv_exists.
         ENDTRY.
         IF lv_exists IS INITIAL.
           APPEND VALUE #(
             fieldname = lv_fieldname
             value     = lv_value
-            message   = |{ lv_fieldname } = '{ lv_value }' does not exist in { ls_check-checktable }| )
+            message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
             TO rt_errors.
         ENDIF.
       ELSEIF ls_check-has_fixed = abap_true
@@ -1306,9 +1382,49 @@ METHOD build_where_clause.
           TO rt_errors.
       ENDIF.
     ENDLOOP.
+
+    ASSIGN COMPONENT 'VALID_FROM' OF STRUCTURE <record>
+      TO FIELD-SYMBOL(<valid_from>).
+    ASSIGN COMPONENT 'VALID_TO' OF STRUCTURE <record>
+      TO FIELD-SYMBOL(<valid_to>).
+    IF <valid_from> IS ASSIGNED
+       AND <valid_to> IS ASSIGNED
+       AND <valid_from> IS NOT INITIAL
+       AND <valid_to> IS NOT INITIAL
+       AND <valid_to> < <valid_from>.
+      APPEND VALUE #(
+        fieldname = 'VALID_TO'
+        value     = |{ <valid_to> }|
+        message   = |VALID_TO must be on or after VALID_FROM.| )
+        TO rt_errors.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD validate_record_values.
+    rv_message = build_validation_message(
+      it_errors = validate_domain_values(
+        iv_table_name = iv_table_name
+        ir_record     = ir_record ) ).
   ENDMETHOD.
 
   METHOD get_domain_check_info.
+    SELECT SINGLE dd08l~checktable, dd05s~fieldname
+      FROM dd08l
+      INNER JOIN dd05s
+        ON  dd05s~tabname   = dd08l~tabname
+        AND dd05s~fieldname = dd08l~fieldname
+        AND dd05s~as4local  = dd08l~as4local
+      WHERE dd08l~tabname    = @iv_table_name
+        AND dd08l~as4local   = 'A'
+        AND dd08l~checktable IS NOT INITIAL
+        AND dd05s~forkey     = @iv_fieldname
+      INTO (@rs_info-checktable, @rs_info-checkfield).
+    IF sy-subrc = 0.
+      RETURN.
+    ENDIF.
+
+    DATA lv_entitytab TYPE tabname.
+
     SELECT SINGLE rollname
       FROM dd03l
       WHERE tabname = @iv_table_name
@@ -1326,18 +1442,48 @@ METHOD build_where_clause.
     IF sy-subrc <> 0 OR lv_domname IS INITIAL.
       RETURN.
     ENDIF.
+
     SELECT SINGLE entitytab
       FROM dd01l
-      WHERE domname = @lv_domname
+      WHERE domname  = @lv_domname
         AND as4local = 'A'
-      INTO @rs_info-checktable.
-    IF rs_info-checktable IS NOT INITIAL.
-      RETURN.
+        AND entitytab IS NOT INITIAL
+      INTO @lv_entitytab.
+
+    IF sy-subrc = 0 AND lv_entitytab IS NOT INITIAL.
+      SELECT SINGLE dd03l~fieldname
+        FROM dd03l
+        INNER JOIN dd04l
+          ON  dd04l~rollname = dd03l~rollname
+          AND dd04l~as4local = dd03l~as4local
+        WHERE dd03l~tabname   = @lv_entitytab
+          AND dd03l~keyflag   = 'X'
+          AND dd03l~as4local  = 'A'
+          AND dd03l~fieldname <> 'MANDT'
+          AND dd04l~domname   = @lv_domname
+        INTO @rs_info-checkfield.
+
+      IF sy-subrc <> 0.
+        SELECT SINGLE fieldname
+          FROM dd03l
+          WHERE tabname   = @lv_entitytab
+            AND keyflag   = 'X'
+            AND as4local  = 'A'
+            AND fieldname <> 'MANDT'
+          INTO @rs_info-checkfield.
+      ENDIF.
+
+      IF rs_info-checkfield IS NOT INITIAL.
+        rs_info-checktable = lv_entitytab.
+        RETURN.
+      ENDIF.
     ENDIF.
+
     SELECT SINGLE @abap_true
       FROM dd07l
       WHERE domname = @lv_domname
         AND as4local = 'A'
+        AND domvalue_l <> @space
       INTO @rs_info-has_fixed.
   ENDMETHOD.
 

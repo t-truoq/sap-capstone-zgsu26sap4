@@ -33,6 +33,8 @@ CLASS zcl_ai_field_describer DEFINITION
 
   PRIVATE SECTION.
 
+    CONSTANTS gc_key_id TYPE char30 VALUE 'GEMINI_API_KEY' ##NO_TEXT.
+
     CLASS-METHODS build_prompt
       IMPORTING iv_table_name    TYPE tabname
       RETURNING VALUE(rv_prompt) TYPE string.
@@ -44,6 +46,9 @@ CLASS zcl_ai_field_describer DEFINITION
     CLASS-METHODS parse_response
       IMPORTING iv_json          TYPE string
       RETURNING VALUE(rt_result) TYPE ty_descriptions.
+
+    CLASS-METHODS get_api_key
+      RETURNING VALUE(rv_key) TYPE string.
 
 ENDCLASS.
 
@@ -87,9 +92,9 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
         ls_row-description  = ls_ai-description.
         ls_row-constraints  = ls_ai-constraints.
         ls_row-tooltip_text = |{ ls_ai-description } | &&
-                               |[Ràng buộc: { ls_ai-constraints }]|.
+                               |[Ràng buộc: { ls_ai-constraints }]| ##NO_TEXT.
       ELSE.
-        ls_row-tooltip_text = 'Không có mô tả từ AI'.
+        ls_row-tooltip_text = 'Không có mô tả từ AI' ##NO_TEXT.
       ENDIF.
 
       APPEND ls_row TO rt_result.
@@ -115,10 +120,10 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
     LOOP AT lt_fields INTO DATA(ls_field).
 
       DATA lv_line TYPE string.
-      lv_line = |Field: { ls_field-fieldname }|.
+      lv_line = |Field: { ls_field-fieldname }| ##NO_TEXT.
 
       IF ls_field-rollname IS NOT INITIAL.
-        lv_line = lv_line && | (DataElement: { ls_field-rollname })|.
+        lv_line = lv_line && | (DataElement: { ls_field-rollname })| ##NO_TEXT.
       ENDIF.
 
       IF ls_field-domname IS NOT INITIAL.
@@ -132,14 +137,14 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
         IF lt_vals IS NOT INITIAL.
           DATA lv_vals TYPE string.
           LOOP AT lt_vals INTO DATA(ls_val).
-            lv_vals = lv_vals && |{ ls_val-domvalue_l }={ ls_val-ddtext }; |.
+            lv_vals = lv_vals && |{ ls_val-domvalue_l }={ ls_val-ddtext }; | ##NO_TEXT.
           ENDLOOP.
-          lv_line = lv_line && | [Values: { lv_vals }]|.
+          lv_line = lv_line && | [Values: { lv_vals }]| ##NO_TEXT.
         ENDIF.
       ENDIF.
 
       IF ls_field-keyflag = 'X'.
-        lv_line = lv_line && | [KEY]|.
+        lv_line = lv_line && | [KEY]| ##NO_TEXT.
       ENDIF.
 
       lv_fields_text = lv_fields_text && lv_line && |\n|.
@@ -153,20 +158,46 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
                 |"description" (string, business purpose in Vietnamese, max 1 sentence), | &&
                 |"constraints" (string, input rules in Vietnamese, max 1 sentence). | &&
                 |Return ONLY the raw JSON array. No markdown, no explanation, no code block.\n\n| &&
-                |Fields:\n{ lv_fields_text }|.
+                |Fields:\n{ lv_fields_text }| ##NO_TEXT.
+
+  ENDMETHOD.
+
+  METHOD get_api_key.
+
+    SELECT SINGLE enc_value
+      FROM zai_apikeys
+      WHERE key_id = @gc_key_id
+      INTO @DATA(lv_enc).
+
+    IF sy-subrc <> 0 OR lv_enc IS INITIAL.
+      rv_key = ''.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        DATA(lo_encryptor) = NEW cl_hard_wired_encryptor( ).
+        rv_key = lo_encryptor->decrypt_string2string( lv_enc ).
+      CATCH cx_encrypt_error.
+        rv_key = ''.
+    ENDTRY.
 
   ENDMETHOD.
 
   METHOD call_llm.
 
-    DATA lv_api_key TYPE string VALUE 'x'.
+    DATA(lv_api_key) = get_api_key( ).
+
+    IF lv_api_key IS INITIAL.
+      rv_result = ''.
+      RETURN.
+    ENDIF.
 
     TRY.
         DATA lo_http_client TYPE REF TO if_http_client.
 
         DATA(lv_url) =
           |https://generativelanguage.googleapis.com/v1beta/models/| &&
-          |gemini-flash-latest:generateContent?key={ lv_api_key }|.
+          |gemini-3.6-flash:generateContent| ##NO_TEXT.
 
         cl_http_client=>create_by_url(
           EXPORTING
@@ -182,12 +213,17 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
 
         IF sy-subrc <> 0. RETURN. ENDIF.
 
-        lo_http_client->request->set_method( 'POST' ).
+        lo_http_client->request->set_method( 'POST' ) ##NO_TEXT.
 
         lo_http_client->request->set_header_field(
           name  = 'Content-Type'
           value = 'application/json'
-        ).
+        ) ##NO_TEXT.
+
+        lo_http_client->request->set_header_field(
+          name  = 'x-goog-api-key'
+          value = lv_api_key
+        ) ##NO_TEXT.
 
         DATA(lv_body) = |\{| &&
           |"contents":[| &&
@@ -201,9 +237,9 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
           |"generationConfig":\{| &&
             |"temperature":0.3,| &&
             |"maxOutputTokens":8000,| &&
-            |"thinkingConfig":\{"thinkingBudget":0\}| &&
+            |"thinkingConfig":\{"thinkingLevel":"minimal"\}| &&
           |\}| &&
-        |\}|.
+        |\}| ##NO_TEXT.
 
         lo_http_client->request->set_cdata( lv_body ).
 
@@ -240,7 +276,7 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
     TRY.
         DATA lv_content TYPE string.
 
-        FIND FIRST OCCURRENCE OF REGEX '"text"\s*:\s*"((?:[^"\\]|\\.)*)"'
+        FIND FIRST OCCURRENCE OF REGEX '"text"\s*:\s*"((?:[^"\\]|\\.)*)"' ##REGEX_POSIX
           IN iv_json
           SUBMATCHES lv_content.
 
@@ -252,8 +288,8 @@ CLASS zcl_ai_field_describer IMPLEMENTATION.
         REPLACE ALL OCCURRENCES OF '\n' IN lv_content WITH ' '.
         REPLACE ALL OCCURRENCES OF '\\' IN lv_content WITH '\'.
 
-        REPLACE FIRST OCCURRENCE OF REGEX '```json\s*' IN lv_content WITH ''.
-        REPLACE FIRST OCCURRENCE OF REGEX '```\s*$'    IN lv_content WITH ''.
+        REPLACE FIRST OCCURRENCE OF REGEX '```json\s*' IN lv_content WITH '' ##REGEX_POSIX.
+        REPLACE FIRST OCCURRENCE OF REGEX '```\s*$'    IN lv_content WITH '' ##REGEX_POSIX.
 
         /ui2/cl_json=>deserialize(
           EXPORTING json = lv_content

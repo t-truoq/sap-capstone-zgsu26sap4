@@ -41,7 +41,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD approve.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
-      DATA(lv_msg_approve_admin) = |Action APPROVE chỉ dành cho ADMIN| ##NO_TEXT.
+      MESSAGE e008(z_gsu26sap04) WITH 'APPROVE' INTO DATA(lv_msg_approve_admin).
       LOOP AT keys INTO DATA(ls_approve_key).
         APPEND VALUE #(
           %tky = ls_approve_key-%tky
@@ -61,7 +61,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
-        DATA(lv_msg_not_pending_a) = |Request { ls_request-aprvlid } is not in PENDING status| ##NO_TEXT.
+        MESSAGE e042(z_gsu26sap04) WITH ls_request-aprvlid INTO DATA(lv_msg_not_pending_a).
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
@@ -103,7 +103,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
             iv_record_key = ls_request-recordkey ).
 
         WHEN OTHERS.
-          DATA(lv_msg_unsupported) = |Unsupported approval action { ls_request-actiontype }| ##NO_TEXT.
+          MESSAGE e043(z_gsu26sap04) WITH ls_request-actiontype INTO DATA(lv_msg_unsupported).
           ls_apply_result = VALUE #(
             success = abap_false
             message = lv_msg_unsupported ).
@@ -132,7 +132,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD reject.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
-      DATA(lv_msg_reject_admin) = |Action REJECT chỉ dành cho ADMIN| ##NO_TEXT.
+      MESSAGE e008(z_gsu26sap04) WITH 'REJECT' INTO DATA(lv_msg_reject_admin).
       LOOP AT keys INTO DATA(ls_reject_key).
         APPEND VALUE #(
           %tky = ls_reject_key-%tky
@@ -150,11 +150,11 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_requests).
 
-    DATA(lv_default_reject_remark) = 'Rejected by admin' ##NO_TEXT.
+MESSAGE e046(z_gsu26sap04) INTO DATA(lv_default_reject_remark).
 
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
-        DATA(lv_msg_not_pending_r) = |Request { ls_request-aprvlid } is not in PENDING status| ##NO_TEXT.
+        MESSAGE e042(z_gsu26sap04) WITH ls_request-aprvlid INTO DATA(lv_msg_not_pending_r).
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
@@ -197,7 +197,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WHERE aprvl_id = @ls_request-aprvlid
           AND status = 'PENDING'.
 
-      DATA(lv_msg_rejected) = |Request rejected: { lv_remarks }| ##NO_TEXT.
+      MESSAGE e044(z_gsu26sap04) WITH lv_remarks INTO DATA(lv_msg_rejected).
       APPEND VALUE #(
         %tky = ls_request-%tky
         %param = VALUE #(

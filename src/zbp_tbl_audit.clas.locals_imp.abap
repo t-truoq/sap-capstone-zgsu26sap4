@@ -1,5 +1,12 @@
 CLASS lhc_auditlog DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
+    TYPES:
+      BEGIN OF ty_rollback_blocker,
+        audit_id    TYPE sysuuid_c32,
+        changed_at  TYPE ztbl_audit-changed_at,
+        action_type TYPE ztde_action_type,
+      END OF ty_rollback_blocker.
+
     METHODS get_instance_authorizations FOR INSTANCE AUTHORIZATION
       IMPORTING keys REQUEST requested_authorizations FOR auditlog RESULT result.
 
@@ -24,6 +31,16 @@ CLASS lhc_auditlog DEFINITION INHERITING FROM cl_abap_behavior_handler.
                 iv_action_type TYPE ztde_action_type
       RETURNING VALUE(rv_error) TYPE string
       RAISING cx_root.
+
+    METHODS find_newer_audit
+      IMPORTING iv_table_name TYPE tabname
+                iv_record_key TYPE ztde_record_key
+                iv_changed_at TYPE ztbl_audit-changed_at
+      RETURNING VALUE(rs_blocker) TYPE ty_rollback_blocker.
+
+    METHODS strip_rollback_admin_fields
+      IMPORTING iv_json        TYPE string
+      RETURNING VALUE(rv_json) TYPE string.
 ENDCLASS.
 
 CLASS lhc_auditlog IMPLEMENTATION.
@@ -67,7 +84,7 @@ CLASS lhc_auditlog IMPLEMENTATION.
   METHOD rollback.
     READ ENTITIES OF zi_tbl_audit IN LOCAL MODE
       ENTITY auditlog
-        FIELDS ( auditid tablename recordkey fieldname oldvalue newvalue actiontype rollbackauditid )
+        FIELDS ( auditid tablename recordkey fieldname oldvalue newvalue changedat actiontype rollbackauditid )
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_audit).
 
@@ -93,17 +110,23 @@ CLASS lhc_auditlog IMPLEMENTATION.
 
           "Preflight the complete operation before changing any data. This
           "prevents a partial rollback when one item has newer changes.
+          DATA lv_blocked_table TYPE tabname.
+          DATA lv_blocked_key TYPE ztde_record_key.
           IF lt_items IS INITIAL.
+            lv_blocked_table = CONV tabname( ls_audit-tablename ).
+            lv_blocked_key = ls_audit-recordkey.
             DATA(lv_preflight_error) = validate_rollback_item(
-              iv_table_name   = CONV tabname( ls_audit-tablename )
-              iv_record_key   = ls_audit-recordkey
+              iv_table_name   = lv_blocked_table
+              iv_record_key   = lv_blocked_key
               iv_new_value    = CONV string( ls_audit-newvalue )
               iv_action_type  = CONV ztde_action_type( ls_audit-actiontype ) ).
           ELSE.
             LOOP AT lt_items INTO DATA(ls_preflight_item).
+              lv_blocked_table = CONV tabname( ls_preflight_item-table_name ).
+              lv_blocked_key = ls_preflight_item-record_key.
               lv_preflight_error = validate_rollback_item(
-                iv_table_name   = CONV tabname( ls_preflight_item-table_name )
-                iv_record_key   = ls_preflight_item-record_key
+                iv_table_name   = lv_blocked_table
+                iv_record_key   = lv_blocked_key
                 iv_new_value    = CONV string( ls_preflight_item-new_value )
                 iv_action_type  = ls_preflight_item-action_type ).
               IF lv_preflight_error IS NOT INITIAL.
@@ -113,6 +136,22 @@ CLASS lhc_auditlog IMPLEMENTATION.
           ENDIF.
 
           IF lv_preflight_error IS NOT INITIAL.
+            IF lv_preflight_error CS 'newer changes'.
+              DATA(ls_blocker) = find_newer_audit(
+                iv_table_name = lv_blocked_table
+                iv_record_key = lv_blocked_key
+                iv_changed_at = ls_audit-changedat ).
+              IF ls_blocker-audit_id IS NOT INITIAL.
+                DATA(lv_blocker_time_utc_minus5) = utclong_add(
+                  val   = ls_blocker-changed_at
+                  hours = -5 ).
+                lv_preflight_error =
+                  |Rollback blocked for { lv_blocked_key }. |
+                  && |Rollback newer audit { ls_blocker-audit_id } |
+                  && |(action { ls_blocker-action_type }, changed at { lv_blocker_time_utc_minus5 } UTC-5) first, |
+                  && |then retry audit { ls_audit-auditid }.|.
+              ENDIF.
+            ENDIF.
             RAISE EXCEPTION TYPE zcx_excel_pipeline
               EXPORTING iv_text = lv_preflight_error.
           ENDIF.
@@ -218,6 +257,44 @@ CLASS lhc_auditlog IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD find_newer_audit.
+    SELECT audit_id, changed_at, action_type
+      FROM ztbl_audit
+      WHERE table_name = @iv_table_name
+        AND record_key = @iv_record_key
+        AND changed_at > @iv_changed_at
+        AND action_type <> 'R'
+        AND rollback_audit_id = @space
+      ORDER BY changed_at DESCENDING
+      INTO TABLE @DATA(lt_direct)
+      UP TO 1 ROWS.
+
+    SELECT FROM ztbl_audit AS audit
+      INNER JOIN ztbl_audit_item AS item
+        ON item~audit_id = audit~audit_id
+      FIELDS audit~audit_id,
+             audit~changed_at,
+             audit~action_type
+      WHERE item~table_name = @iv_table_name
+        AND item~record_key = @iv_record_key
+        AND audit~changed_at > @iv_changed_at
+        AND audit~action_type <> 'R'
+        AND audit~rollback_audit_id = @space
+      ORDER BY audit~changed_at DESCENDING
+      INTO TABLE @DATA(lt_bulk)
+      UP TO 1 ROWS.
+
+    IF lt_direct IS NOT INITIAL.
+      rs_blocker = CORRESPONDING #( lt_direct[ 1 ] ).
+    ENDIF.
+
+    IF lt_bulk IS NOT INITIAL
+       AND ( rs_blocker-audit_id IS INITIAL
+          OR lt_bulk[ 1 ]-changed_at > rs_blocker-changed_at ).
+      rs_blocker = CORRESPONDING #( lt_bulk[ 1 ] ).
+    ENDIF.
+  ENDMETHOD.
+
   METHOD validate_rollback_item.
     DATA(lv_action) = CONV string( iv_action_type ).
     CONDENSE lv_action.
@@ -273,8 +350,9 @@ CLASS lhc_auditlog IMPLEMENTATION.
 
     DATA lr_expected TYPE REF TO data.
     CREATE DATA lr_expected TYPE HANDLE lo_desc.
+    DATA(lv_new_value_safe) = strip_rollback_admin_fields( iv_new_value ).
     zcl_dyn_record_handler=>deserialize(
-      EXPORTING iv_json = iv_new_value
+      EXPORTING iv_json = lv_new_value_safe
       CHANGING  ca_record = lr_expected ).
     ASSIGN lr_expected->* TO FIELD-SYMBOL(<expected>).
 
@@ -323,9 +401,10 @@ CLASS lhc_auditlog IMPLEMENTATION.
             success = abap_false
             message = 'Rollback update failed: old record snapshot is empty.' ).
         ELSE.
+          DATA(lv_old_update_safe) = strip_rollback_admin_fields( iv_old_value ).
           rs_result = zcl_dyn_record_handler=>update_record(
             iv_table_name  = iv_table_name
-            iv_record_data = iv_old_value
+            iv_record_data = lv_old_update_safe
             iv_parent_audit_id = iv_parent_audit_id ).
         ENDIF.
 
@@ -335,9 +414,10 @@ CLASS lhc_auditlog IMPLEMENTATION.
             success = abap_false
             message = 'Rollback delete failed: old record snapshot is empty.' ).
         ELSE.
+          DATA(lv_old_create_safe) = strip_rollback_admin_fields( iv_old_value ).
           rs_result = zcl_dyn_record_handler=>create_record(
             iv_table_name  = iv_table_name
-            iv_record_data = iv_old_value
+            iv_record_data = lv_old_create_safe
             iv_parent_audit_id = iv_parent_audit_id ).
         ENDIF.
 
@@ -346,5 +426,26 @@ CLASS lhc_auditlog IMPLEMENTATION.
           success = abap_false
           message = |Unsupported audit action { iv_action_type } for rollback| ).
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD strip_rollback_admin_fields.
+    rv_json = iv_json.
+
+    DATA lt_fields TYPE string_table.
+    APPEND 'CREATED_AT' TO lt_fields.
+    APPEND 'CHANGED_AT' TO lt_fields.
+    APPEND 'LAST_CHANGED_AT' TO lt_fields.
+    APPEND 'LOCAL_LAST_CHANGED_AT' TO lt_fields.
+
+    LOOP AT lt_fields INTO DATA(lv_field).
+      DATA(lv_pattern) = |,"{ lv_field }":"[^"]*"|.
+      REPLACE ALL OCCURRENCES OF REGEX lv_pattern IN rv_json WITH ``.
+
+      lv_pattern = |"{ lv_field }":"[^"]*",|.
+      REPLACE ALL OCCURRENCES OF REGEX lv_pattern IN rv_json WITH ``.
+
+      lv_pattern = |"{ lv_field }":"[^"]*"|.
+      REPLACE ALL OCCURRENCES OF REGEX lv_pattern IN rv_json WITH ``.
+    ENDLOOP.
   ENDMETHOD.
 ENDCLASS.

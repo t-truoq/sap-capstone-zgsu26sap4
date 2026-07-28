@@ -1,9 +1,12 @@
 @AbapCatalog.viewEnhancementCategory: [#NONE]
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 @EndUserText.label: 'Interface View for Table Config'
-@Metadata.ignorePropagatedAnnotations: true
+@Metadata.ignorePropagatedAnnotations: false
 define root view entity ZI_TBL_CONFIG
   as select from ztbl_config
+  association [0..1] to ztbl_user_master as _CurrentUser
+    on  _CurrentUser.username    = $session.user
+    and _CurrentUser.active_flag = 'X'
   composition [0..*] of ZI_FLD_CONFIG as _FieldConfig
 {
   key config_uuid       as ConfigUuid,
@@ -14,3 +17,4 @@ define root view entity ZI_TBL_CONFIG
 
       _FieldConfig
 }
+where _CurrentUser.active_flag = 'X'
