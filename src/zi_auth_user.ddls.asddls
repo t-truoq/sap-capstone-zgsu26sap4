@@ -20,6 +20,7 @@ define root view entity ZI_AUTH_USER
       }]
       role_type   as RoleType,
 
+      @Semantics.booleanIndicator: true
       active_flag as ActiveFlag
 }
 where _CurrentUser.active_flag = 'X'
