@@ -1328,6 +1328,7 @@ METHOD build_where_clause.
         DATA(lv_exists) = abap_false.
         DATA(lv_fk_value) = lv_value.
         DATA(lv_check_msg_field) = CONV string( lv_fieldname ).
+        DATA(lv_fk_is_raw) = abap_false.
         SELECT SINGLE leng, inttype
           FROM dd03l
           WHERE tabname   = @ls_check-checktable
@@ -1335,7 +1336,21 @@ METHOD build_where_clause.
             AND as4local  = 'A'
           INTO @DATA(ls_fk_dd03l).
         IF sy-subrc = 0.
-          IF ls_fk_dd03l-leng > 0 AND strlen( lv_fk_value ) > ls_fk_dd03l-leng.
+          IF ls_fk_dd03l-inttype = 'X'.
+            DATA(lv_expected_hex_len) = ls_fk_dd03l-leng * 2.
+            CONDENSE lv_fk_value NO-GAPS.
+            TRANSLATE lv_fk_value TO UPPER CASE.
+            IF strlen( lv_fk_value ) <> lv_expected_hex_len
+               OR lv_fk_value CN '0123456789ABCDEF'.
+              APPEND VALUE #(
+                fieldname = lv_fieldname
+                value     = lv_value
+                message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
+                TO rt_errors.
+              CONTINUE.
+            ENDIF.
+            lv_fk_is_raw = abap_true.
+          ELSEIF ls_fk_dd03l-leng > 0 AND strlen( lv_fk_value ) > ls_fk_dd03l-leng.
             APPEND VALUE #(
               fieldname = lv_fieldname
               value     = lv_value
@@ -1353,13 +1368,43 @@ METHOD build_where_clause.
             CONTINUE.
           ENDIF.
         ENDIF.
-        REPLACE ALL OCCURRENCES OF |'| IN lv_fk_value WITH |''|.
-        DATA(lv_where) = |{ ls_check-checkfield } = '{ lv_fk_value }'|.
+        DATA(lv_where) = VALUE string( ).
+        IF lv_fk_is_raw = abap_true.
+          lv_where = |{ ls_check-checkfield } = X'{ lv_fk_value }'|.
+        ELSE.
+          REPLACE ALL OCCURRENCES OF |'| IN lv_fk_value WITH |''|.
+          lv_where = |{ ls_check-checkfield } = '{ lv_fk_value }'|.
+        ENDIF.
         TRY.
-            SELECT SINGLE @abap_true
-              FROM (ls_check-checktable)
-              WHERE (lv_where)
-              INTO @lv_exists.
+            IF lv_fk_is_raw = abap_true.
+              DATA(lr_parent_data) = zcl_dyn_record_handler=>get_table_data(
+                iv_table_name = ls_check-checktable
+                iv_max_rows   = 1000 ).
+              ASSIGN lr_parent_data->* TO FIELD-SYMBOL(<lt_parent_rows>).
+              IF <lt_parent_rows> IS ASSIGNED.
+                LOOP AT <lt_parent_rows> ASSIGNING FIELD-SYMBOL(<ls_parent_row>).
+                  ASSIGN COMPONENT ls_check-checkfield OF STRUCTURE <ls_parent_row>
+                    TO FIELD-SYMBOL(<lv_parent_fk>).
+                  IF sy-subrc <> 0 OR <lv_parent_fk> IS INITIAL.
+                    CONTINUE.
+                  ENDIF.
+
+                  DATA(lv_parent_fk_value) = |{ <lv_parent_fk> }|.
+                  CONDENSE lv_parent_fk_value NO-GAPS.
+                  TRANSLATE lv_parent_fk_value TO UPPER CASE.
+
+                  IF lv_parent_fk_value = lv_fk_value.
+                    lv_exists = abap_true.
+                    EXIT.
+                  ENDIF.
+                ENDLOOP.
+              ENDIF.
+            ELSE.
+              SELECT SINGLE @abap_true
+                FROM (ls_check-checktable)
+                WHERE (lv_where)
+                INTO @lv_exists.
+            ENDIF.
           CATCH cx_root.
             CLEAR lv_exists.
         ENDTRY.
@@ -1408,7 +1453,26 @@ METHOD build_where_clause.
   ENDMETHOD.
 
   METHOD get_domain_check_info.
-    SELECT SINGLE dd08l~checktable, dd05s~fieldname
+    SELECT SINGLE rollname
+      FROM dd03l
+      WHERE tabname   = @iv_table_name
+        AND fieldname = @iv_fieldname
+        AND as4local  = 'A'
+      INTO @DATA(lv_rollname).
+    IF sy-subrc <> 0 OR lv_rollname IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    SELECT SINGLE domname
+      FROM dd04l
+      WHERE rollname = @lv_rollname
+        AND as4local = 'A'
+      INTO @DATA(lv_domname).
+    IF sy-subrc <> 0 OR lv_domname IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    SELECT SINGLE dd08l~checktable, dd05s~forstring
       FROM dd08l
       INNER JOIN dd05s
         ON  dd05s~tabname   = dd08l~tabname
@@ -1419,29 +1483,51 @@ METHOD build_where_clause.
         AND dd08l~checktable IS NOT INITIAL
         AND dd05s~forkey     = @iv_fieldname
       INTO (@rs_info-checktable, @rs_info-checkfield).
+
     IF sy-subrc = 0.
-      RETURN.
+      DATA lv_checkfield_exists TYPE abap_bool.
+      IF rs_info-checkfield IS NOT INITIAL.
+        SELECT SINGLE @abap_true
+          FROM dd03l
+          WHERE tabname   = @rs_info-checktable
+            AND fieldname = @rs_info-checkfield
+            AND as4local  = 'A'
+          INTO @lv_checkfield_exists.
+      ENDIF.
+
+      IF lv_checkfield_exists <> abap_true.
+        CLEAR rs_info-checkfield.
+        SELECT SINGLE dd03l~fieldname
+          FROM dd03l
+          INNER JOIN dd04l
+            ON  dd04l~rollname = dd03l~rollname
+            AND dd04l~as4local = dd03l~as4local
+          WHERE dd03l~tabname   = @rs_info-checktable
+            AND dd03l~keyflag   = 'X'
+            AND dd03l~as4local  = 'A'
+            AND dd03l~fieldname <> 'MANDT'
+            AND dd04l~domname   = @lv_domname
+          INTO @rs_info-checkfield.
+      ENDIF.
+
+      IF rs_info-checkfield IS INITIAL.
+        SELECT SINGLE fieldname
+          FROM dd03l
+          WHERE tabname   = @rs_info-checktable
+            AND keyflag   = 'X'
+            AND as4local  = 'A'
+            AND fieldname <> 'MANDT'
+          INTO @rs_info-checkfield.
+      ENDIF.
+
+      IF rs_info-checkfield IS NOT INITIAL.
+        RETURN.
+      ENDIF.
+
+      CLEAR rs_info-checktable.
     ENDIF.
 
     DATA lv_entitytab TYPE tabname.
-
-    SELECT SINGLE rollname
-      FROM dd03l
-      WHERE tabname = @iv_table_name
-        AND fieldname = @iv_fieldname
-        AND as4local = 'A'
-      INTO @DATA(lv_rollname).
-    IF sy-subrc <> 0 OR lv_rollname IS INITIAL.
-      RETURN.
-    ENDIF.
-    SELECT SINGLE domname
-      FROM dd04l
-      WHERE rollname = @lv_rollname
-        AND as4local = 'A'
-      INTO @DATA(lv_domname).
-    IF sy-subrc <> 0 OR lv_domname IS INITIAL.
-      RETURN.
-    ENDIF.
 
     SELECT SINGLE entitytab
       FROM dd01l
