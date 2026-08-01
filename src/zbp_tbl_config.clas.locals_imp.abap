@@ -1909,6 +1909,8 @@ METHOD getfkvalues.
 
     " ── Bước 2: Tìm key_field (FORSTRING = field tương ứng bên bảng cha) ─
     DATA lv_key_field TYPE string.
+    DATA lv_child_domain TYPE dd03l-domname.
+    DATA lv_key_field_exists TYPE abap_bool.
 
     SELECT SINGLE dd05s~forstring
       FROM dd05s
@@ -1923,12 +1925,56 @@ METHOD getfkvalues.
 
     IF sy-subrc = 0 AND lv_forstring IS NOT INITIAL.
       lv_key_field = lv_forstring.
-    ELSE.
+      CLEAR lv_key_field_exists.
+      SELECT SINGLE @abap_true
+        FROM dd03l
+        WHERE tabname   = @lv_ref_table
+          AND fieldname = @lv_key_field
+          AND as4local  = 'A'
+        INTO @lv_key_field_exists.
+      IF lv_key_field_exists <> abap_true.
+        CLEAR lv_key_field.
+      ENDIF.
+    ENDIF.
+
+    IF lv_key_field IS INITIAL.
+      CLEAR lv_child_domain.
+      SELECT SINGLE dd04l~domname
+        FROM dd03l
+        INNER JOIN dd04l
+          ON  dd04l~rollname = dd03l~rollname
+          AND dd04l~as4local = dd03l~as4local
+        WHERE dd03l~tabname   = @lv_child_table
+          AND dd03l~fieldname = @lv_fk_field
+          AND dd03l~as4local  = 'A'
+        INTO @lv_child_domain.
+
+      IF lv_child_domain IS NOT INITIAL.
+        SELECT SINGLE dd03l~fieldname
+          FROM dd03l
+          INNER JOIN dd04l
+            ON  dd04l~rollname = dd03l~rollname
+            AND dd04l~as4local = dd03l~as4local
+          WHERE dd03l~tabname   = @lv_ref_table
+            AND dd03l~keyflag   = 'X'
+            AND dd03l~as4local  = 'A'
+            AND dd03l~fieldname <> 'MANDT'
+            AND dd03l~fieldname <> 'CLIENT'
+            AND dd04l~domname   = @lv_child_domain
+          INTO @lv_key_field.
+      ENDIF.
+    ENDIF.
+
+    IF lv_key_field IS INITIAL.
       DATA(lt_pk) = zcl_dyn_record_handler=>get_key_fields(
         iv_table_name = lv_ref_table ).
-      IF lt_pk IS NOT INITIAL.
-        lv_key_field = lt_pk[ 1 ].
-      ENDIF.
+      LOOP AT lt_pk INTO DATA(lv_pk_field).
+        IF lv_pk_field = 'MANDT' OR lv_pk_field = 'CLIENT'.
+          CONTINUE.
+        ENDIF.
+        lv_key_field = lv_pk_field.
+        EXIT.
+      ENDLOOP.
     ENDIF.
 
     " ── Bước 3: Tìm display_field ────────────────────────────────────────

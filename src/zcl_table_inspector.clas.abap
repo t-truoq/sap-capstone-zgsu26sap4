@@ -150,7 +150,93 @@ METHOD get_field_list.
       ENDIF.
     ENDLOOP.
 
-    RETURN.
+    IF rt_domain_values IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    DATA lv_value_table TYPE tabname.
+    DATA lv_value_field TYPE fieldname.
+
+    SELECT SINGLE entitytab
+      FROM dd01l
+      WHERE domname   = @iv_domain_name
+        AND as4local  = 'A'
+        AND entitytab IS NOT INITIAL
+      INTO @lv_value_table.
+
+    IF sy-subrc <> 0 OR lv_value_table IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    SELECT SINGLE dd03l~fieldname
+      FROM dd03l
+      INNER JOIN dd04l
+        ON  dd04l~rollname = dd03l~rollname
+        AND dd04l~as4local = dd03l~as4local
+      WHERE dd03l~tabname   = @lv_value_table
+        AND dd03l~keyflag   = 'X'
+        AND dd03l~as4local  = 'A'
+        AND dd03l~fieldname <> 'MANDT'
+        AND dd04l~domname   = @iv_domain_name
+      INTO @lv_value_field.
+
+    IF sy-subrc <> 0 OR lv_value_field IS INITIAL.
+      SELECT SINGLE fieldname
+        FROM dd03l
+        WHERE tabname   = @lv_value_table
+          AND keyflag   = 'X'
+          AND as4local  = 'A'
+          AND fieldname <> 'MANDT'
+        INTO @lv_value_field.
+    ENDIF.
+
+    IF lv_value_field IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        DATA(lo_struct_desc) = CAST cl_abap_structdescr(
+          cl_abap_typedescr=>describe_by_name( lv_value_table ) ).
+        DATA(lo_table_desc) = cl_abap_tabledescr=>create(
+          p_line_type = lo_struct_desc ).
+
+        DATA lr_value_data TYPE REF TO data.
+        FIELD-SYMBOLS <lt_value_rows> TYPE STANDARD TABLE.
+        CREATE DATA lr_value_data TYPE HANDLE lo_table_desc.
+        ASSIGN lr_value_data->* TO <lt_value_rows>.
+        IF <lt_value_rows> IS NOT ASSIGNED.
+          RETURN.
+        ENDIF.
+
+        SELECT *
+          FROM (lv_value_table)
+          INTO TABLE @<lt_value_rows>
+          UP TO 200 ROWS.
+
+        LOOP AT <lt_value_rows> ASSIGNING FIELD-SYMBOL(<ls_value_row>).
+          ASSIGN COMPONENT lv_value_field OF STRUCTURE <ls_value_row>
+            TO FIELD-SYMBOL(<lv_value>).
+          IF sy-subrc <> 0 OR <lv_value> IS INITIAL.
+            CONTINUE.
+          ENDIF.
+
+          DATA(lv_value_text) = |{ <lv_value> }|.
+          CONDENSE lv_value_text.
+
+          IF lv_value_text IS INITIAL.
+            CONTINUE.
+          ENDIF.
+
+          APPEND VALUE #(
+            value       = lv_value_text
+            description = lv_value_text ) TO rt_domain_values.
+        ENDLOOP.
+      CATCH cx_root.
+        CLEAR rt_domain_values.
+    ENDTRY.
+
+    SORT rt_domain_values BY value.
+    DELETE ADJACENT DUPLICATES FROM rt_domain_values COMPARING value.
 
   ENDMETHOD.
 
