@@ -1,6 +1,10 @@
 "! Unmanaged behavior — 3 Excel actions on singleton root ZI_EXCEL_PIPELINE.
 "! ADT generate local class lhc_ExcelPipeline; dan logic vao do.
 "! Action parameter truy cap qua keys-%param (khong co table parameters rieng).
+"!
+"! Ghi chú: gọi zcl_excel_pipeline (class gộp từ zcl_excel_types,
+"! zcl_excel_bulk_aprvl, zcl_excel_diff_builder, zcl_excel_importer,
+"! zcl_excel_odata_handler) thay vì zcl_excel_odata_handler như trước.
 CLASS lhc_ExcelPipeline DEFINITION INHERITING FROM cl_abap_behavior_handler.
   PRIVATE SECTION.
 
@@ -46,14 +50,14 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
     LOOP AT keys INTO DATA(ls_key).
       DATA(ls_param) = ls_key-%param.
 
-      DATA(ls_res) = VALUE zcl_excel_odata_handler=>ty_download_res( ).
+      DATA(ls_res) = VALUE zcl_excel_pipeline=>ty_download_res( ).
 
       TRY.
           zcl_auth_helper=>check_permission(
             iv_table_name = CONV #( ls_param-table_name )
             iv_action     = zcl_auth_helper=>c_action-view ).
 
-          ls_res = zcl_excel_odata_handler=>download_excel( ls_param ).
+          ls_res = zcl_excel_pipeline=>download_excel( ls_param ).
         CATCH zcx_excel_pipeline INTO DATA(lx).
           ls_res-id      = ls_param-id.
           ls_res-message = lx->get_text( ).
@@ -71,11 +75,11 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
     LOOP AT keys INTO DATA(ls_key).
       DATA(ls_param) = ls_key-%param.
 
-      DATA(lt_diff) = VALUE zcl_excel_odata_handler=>tt_diff_cds( ).
+      DATA(lt_diff) = VALUE zcl_excel_pipeline=>tt_diff_cds( ).
       DATA(lv_info) = VALUE string( ).
 
       TRY.
-          zcl_excel_odata_handler=>upload_excel(
+          zcl_excel_pipeline=>upload_excel(
             EXPORTING is_req  = ls_param
             IMPORTING et_diff = lt_diff
                       ev_info = lv_info ).
@@ -109,11 +113,11 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
     LOOP AT keys INTO DATA(ls_key).
       DATA(ls_param) = ls_key-%param.
 
-      DATA(ls_res)  = VALUE zcl_excel_odata_handler=>ty_commit_res( ).
+      DATA(ls_res)  = VALUE zcl_excel_pipeline=>ty_commit_res( ).
 
       TRY.
-          DATA(lt_diff) = zcl_excel_odata_handler=>parse_diff_json( ls_param-diff_json ).
-          ls_res = zcl_excel_odata_handler=>run_confirm_import(
+          DATA(lt_diff) = zcl_excel_pipeline=>parse_diff_json( ls_param-diff_json ).
+          ls_res = zcl_excel_pipeline=>run_confirm_import(
             is_req      = ls_param
             it_diff_cds = lt_diff ).
         CATCH zcx_excel_pipeline INTO DATA(lx).
