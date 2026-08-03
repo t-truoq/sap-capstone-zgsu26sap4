@@ -1,7 +1,4 @@
-"! <p class="shorttext synchronized">Exception cho Excel Pipeline</p>
-"! Message-ID (T100) exception, message class Z_GSU26SAP04.
-"! Van giu IV_TEXT / GET_TEXT redefinition de tuong thich nguoc voi
-"! cac RAISE cu chua migrate (uu tien MV_TEXT neu co, khong thi fallback T100).
+
 CLASS zcx_excel_pipeline DEFINITION
   PUBLIC
   INHERITING FROM cx_static_check
