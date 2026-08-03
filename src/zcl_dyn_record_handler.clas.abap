@@ -492,12 +492,14 @@ ENDMETHOD.
       SELECT *
         FROM (iv_table_name)
         INTO TABLE @<lt_table>
+        BYPASSING BUFFER
         UP TO @iv_max_rows ROWS.
     ELSE.
       SELECT *
         FROM (iv_table_name)
         WHERE (iv_where_clause)
         INTO TABLE @<lt_table>
+        BYPASSING BUFFER
         UP TO @iv_max_rows ROWS.
     ENDIF.
   ENDMETHOD.
@@ -518,20 +520,21 @@ ENDMETHOD.
   ENDMETHOD.
 
  METHOD check_foreign_key.
-    " Đọc tất cả foreign key relationships từ DD08L
-    " DD08L chứa thông tin foreign key definitions
+    TYPES: BEGIN OF ty_fk_compare,
+             child_field  TYPE fieldname,
+             parent_field TYPE fieldname,
+           END OF ty_fk_compare.
+
     DATA lt_fk_refs TYPE TABLE OF dd08l.
+    DATA lt_fk_compare TYPE TABLE OF ty_fk_compare.
+    DATA lv_mapping_complete TYPE abap_bool.
 
     SELECT *
       FROM dd08l
       WHERE checktable = @iv_table_name
+        AND as4local   = 'A'
       INTO TABLE @lt_fk_refs.
 
-    IF lt_fk_refs IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    " Deserialize record key JSON
     TRY.
         DATA(lo_struct_desc) = CAST cl_abap_structdescr(
           cl_abap_typedescr=>describe_by_name( iv_table_name )
@@ -540,65 +543,250 @@ ENDMETHOD.
         CREATE DATA lo_record TYPE HANDLE lo_struct_desc.
         ASSIGN lo_record->* TO FIELD-SYMBOL(<ls_record>).
 
-        /ui2/cl_json=>deserialize(
-          EXPORTING json = iv_record_key
-          CHANGING  data = <ls_record>
+        zcl_dyn_record_handler=>deserialize(
+          EXPORTING iv_json   = iv_record_key
+          CHANGING  ca_record = lo_record
         ).
+
+        zcl_dyn_record_handler=>fill_client( ir_record = lo_record ).
       CATCH cx_root.
         RETURN.
     ENDTRY.
 
-    " Check từng table đang reference
     LOOP AT lt_fk_refs INTO DATA(ls_fk).
+      SELECT forkey, forstring
+        FROM dd05s
+        WHERE tabname   = @ls_fk-tabname
+          AND fieldname = @ls_fk-fieldname
+          AND as4local  = @ls_fk-as4local
+          AND forkey    IS NOT INITIAL
+        INTO TABLE @DATA(lt_fk_fields).
 
-      " Đọc field mapping từ DD05Q
-      DATA lt_fk_fields TYPE TABLE OF dd05q.
-     SELECT *
-        FROM dd05q
-        WHERE tabname  = @ls_fk-tabname
-          AND checktable = @iv_table_name
-        INTO TABLE @lt_fk_fields.
-
-      " Build WHERE clause
-      DATA lv_where TYPE string.
-      LOOP AT lt_fk_fields INTO DATA(ls_fk_field).
-        ASSIGN COMPONENT ls_fk_field-checkfield
-          OF STRUCTURE <ls_record>
-          TO FIELD-SYMBOL(<lv_val>).
-
-        IF sy-subrc = 0 AND <lv_val> IS NOT INITIAL.
-          IF lv_where IS INITIAL.
-            lv_where = |{ ls_fk_field-fieldname } = '{ <lv_val> }'|.
-          ELSE.
-            lv_where = lv_where && | AND { ls_fk_field-fieldname } = '{ <lv_val> }'|.
-          ENDIF.
-        ENDIF.
-      ENDLOOP.
-
-      IF lv_where IS INITIAL.
+      IF lt_fk_fields IS INITIAL.
         CONTINUE.
       ENDIF.
 
-      " Check xem có record nào reference không
-      TRY.
-          SELECT SINGLE @abap_true
-            FROM (ls_fk-tabname)
-            WHERE (lv_where)
-            INTO @DATA(lv_exists).
+      CLEAR lt_fk_compare.
+      lv_mapping_complete = abap_true.
 
-          IF lv_exists = abap_true.
-            rv_error = |Cannot delete: record is referenced by table { ls_fk-tabname }|.
-            RETURN.
+      LOOP AT lt_fk_fields INTO DATA(ls_fk_field_map).
+        DATA(lv_child_field)  = CONV fieldname( ls_fk_field_map-forkey ).
+        DATA(lv_parent_field) = CONV fieldname( ls_fk_field_map-forstring ).
+        DATA lv_parent_field_exists TYPE abap_bool.
+        CLEAR lv_parent_field_exists.
+
+        IF lv_parent_field IS NOT INITIAL.
+          SELECT SINGLE @abap_true
+            FROM dd03l
+            WHERE tabname   = @iv_table_name
+              AND fieldname = @lv_parent_field
+              AND as4local  = 'A'
+            INTO @lv_parent_field_exists.
+        ENDIF.
+
+        IF lv_parent_field_exists <> abap_true.
+          CLEAR lv_parent_field.
+          DATA(ls_check_info) = zcl_dyn_record_handler=>get_domain_check_info(
+            iv_table_name = ls_fk-tabname
+            iv_fieldname  = lv_child_field ).
+
+          IF ls_check_info-checktable = iv_table_name
+             AND ls_check_info-checkfield IS NOT INITIAL.
+            lv_parent_field = ls_check_info-checkfield.
+          ENDIF.
+        ENDIF.
+
+        IF lv_parent_field IS INITIAL.
+          IF lv_child_field = 'MANDT' OR lv_child_field = 'CLIENT'.
+            CONTINUE.
+          ENDIF.
+          lv_mapping_complete = abap_false.
+          EXIT.
+        ENDIF.
+
+        APPEND VALUE ty_fk_compare(
+          child_field  = lv_child_field
+          parent_field = lv_parent_field ) TO lt_fk_compare.
+      ENDLOOP.
+
+      IF lv_mapping_complete = abap_false OR lt_fk_compare IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      TRY.
+          DATA(lo_child_struct) = CAST cl_abap_structdescr(
+            cl_abap_typedescr=>describe_by_name( ls_fk-tabname ) ).
+          DATA(lo_child_table) = cl_abap_tabledescr=>create(
+            p_line_type = lo_child_struct ).
+
+          DATA lr_child_data TYPE REF TO data.
+          FIELD-SYMBOLS <lt_child_rows> TYPE STANDARD TABLE.
+          CREATE DATA lr_child_data TYPE HANDLE lo_child_table.
+          ASSIGN lr_child_data->* TO <lt_child_rows>.
+          IF <lt_child_rows> IS NOT ASSIGNED.
+            CONTINUE.
           ENDIF.
 
-        CATCH cx_sy_dynamic_osql_error.
+          SELECT *
+            FROM (ls_fk-tabname)
+            INTO TABLE @<lt_child_rows>.
+
+          LOOP AT <lt_child_rows> ASSIGNING FIELD-SYMBOL(<ls_child_row>).
+            DATA(lv_all_match) = abap_true.
+
+            LOOP AT lt_fk_compare INTO DATA(ls_fk_compare).
+              ASSIGN COMPONENT ls_fk_compare-parent_field OF STRUCTURE <ls_record>
+                TO FIELD-SYMBOL(<lv_parent_value>).
+              IF sy-subrc <> 0.
+                lv_all_match = abap_false.
+                EXIT.
+              ENDIF.
+              IF <lv_parent_value> IS INITIAL.
+                lv_all_match = abap_false.
+                EXIT.
+              ENDIF.
+
+              ASSIGN COMPONENT ls_fk_compare-child_field OF STRUCTURE <ls_child_row>
+                TO FIELD-SYMBOL(<lv_child_value>).
+              IF sy-subrc <> 0.
+                lv_all_match = abap_false.
+                EXIT.
+              ENDIF.
+              IF <lv_child_value> IS INITIAL.
+                lv_all_match = abap_false.
+                EXIT.
+              ENDIF.
+
+              DATA(lv_parent_text) = |{ <lv_parent_value> }|.
+              DATA(lv_child_text)  = |{ <lv_child_value> }|.
+              CONDENSE lv_parent_text NO-GAPS.
+              CONDENSE lv_child_text NO-GAPS.
+              TRANSLATE lv_parent_text TO UPPER CASE.
+              TRANSLATE lv_child_text TO UPPER CASE.
+
+              IF lv_parent_text <> lv_child_text.
+                lv_all_match = abap_false.
+                EXIT.
+              ENDIF.
+
+              UNASSIGN <lv_parent_value>.
+              UNASSIGN <lv_child_value>.
+            ENDLOOP.
+
+            IF lv_all_match = abap_true.
+              rv_error = |Cannot delete: record is referenced by table { ls_fk-tabname }|.
+              RETURN.
+            ENDIF.
+          ENDLOOP.
+
+        CATCH cx_root.
           CONTINUE.
       ENDTRY.
-
     ENDLOOP.
 
-  ENDMETHOD.
+    DATA(lt_parent_key_fields) = zcl_dyn_record_handler=>get_key_fields( iv_table_name ).
 
+    LOOP AT lt_parent_key_fields INTO DATA(lv_parent_key_field).
+      IF lv_parent_key_field = 'MANDT' OR lv_parent_key_field = 'CLIENT'.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_parent_key_field <> 'ENTITY_ID'.
+        CONTINUE.
+      ENDIF.
+
+      IF zcl_dyn_record_handler=>is_fk_key_field(
+           iv_table_name = iv_table_name
+           iv_fieldname  = CONV fieldname( lv_parent_key_field ) ) = abap_true.
+        CONTINUE.
+      ENDIF.
+
+      ASSIGN COMPONENT lv_parent_key_field OF STRUCTURE <ls_record>
+        TO FIELD-SYMBOL(<lv_parent_key_value>).
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF <lv_parent_key_value> IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_parent_key_text) = |{ <lv_parent_key_value> }|.
+      CONDENSE lv_parent_key_text NO-GAPS.
+      TRANSLATE lv_parent_key_text TO UPPER CASE.
+
+      IF strlen( lv_parent_key_text ) <> 32.
+        CONTINUE.
+      ENDIF.
+
+      FIND REGEX '^[0-9A-F]{32}$' IN lv_parent_key_text.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      DATA lt_candidate_tables TYPE STANDARD TABLE OF tabname WITH DEFAULT KEY.
+      CLEAR lt_candidate_tables.
+
+      SELECT table_name
+        FROM ztbl_config
+        WHERE table_name <> @iv_table_name
+        INTO TABLE @lt_candidate_tables.
+
+      LOOP AT lt_candidate_tables INTO DATA(lv_candidate_table).
+        TRY.
+            DATA(lo_candidate_struct) = CAST cl_abap_structdescr(
+              cl_abap_typedescr=>describe_by_name( lv_candidate_table ) ).
+            DATA(lo_candidate_table) = cl_abap_tabledescr=>create(
+              p_line_type = lo_candidate_struct ).
+
+            DATA lr_candidate_data TYPE REF TO data.
+            FIELD-SYMBOLS <lt_candidate_rows> TYPE STANDARD TABLE.
+            CREATE DATA lr_candidate_data TYPE HANDLE lo_candidate_table.
+            ASSIGN lr_candidate_data->* TO <lt_candidate_rows>.
+            IF <lt_candidate_rows> IS NOT ASSIGNED.
+              CONTINUE.
+            ENDIF.
+
+            SELECT *
+              FROM (lv_candidate_table)
+              INTO TABLE @<lt_candidate_rows>.
+
+            LOOP AT <lt_candidate_rows> ASSIGNING FIELD-SYMBOL(<ls_candidate_row>).
+              LOOP AT lo_candidate_struct->get_components( ) INTO DATA(ls_candidate_field).
+                IF ls_candidate_field-name = 'MANDT'
+                   OR ls_candidate_field-name = 'CLIENT'.
+                  CONTINUE.
+                ENDIF.
+
+                ASSIGN COMPONENT ls_candidate_field-name OF STRUCTURE <ls_candidate_row>
+                  TO FIELD-SYMBOL(<lv_candidate_value>).
+                IF sy-subrc <> 0.
+                  CONTINUE.
+                ENDIF.
+                IF <lv_candidate_value> IS INITIAL.
+                  CONTINUE.
+                ENDIF.
+
+                DATA(lv_candidate_text) = |{ <lv_candidate_value> }|.
+                CONDENSE lv_candidate_text NO-GAPS.
+                TRANSLATE lv_candidate_text TO UPPER CASE.
+
+                IF lv_candidate_text = lv_parent_key_text.
+                  rv_error = |Cannot delete: record is referenced by table { lv_candidate_table }|.
+                  RETURN.
+                ENDIF.
+
+                UNASSIGN <lv_candidate_value>.
+              ENDLOOP.
+            ENDLOOP.
+
+          CATCH cx_root.
+            CONTINUE.
+        ENDTRY.
+      ENDLOOP.
+
+      UNASSIGN <lv_parent_key_value>.
+    ENDLOOP.
+  ENDMETHOD.
 METHOD serialize.
     TRY.
         DATA(lo_desc) = cl_abap_typedescr=>describe_by_data( ia_data ).
