@@ -72,7 +72,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
       ENDIF.
 
       IF ls_request-recordkey = 'BULK'.
-        DATA(ls_bulk_result) = zcl_excel_bulk_aprvl=>approve_bulk(
+        DATA(ls_bulk_result) = zcl_excel_pipeline=>approve_bulk(
           iv_aprvl_id = ls_request-aprvlid ).
 
         APPEND VALUE #(
@@ -87,17 +87,17 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
       DATA ls_apply_result TYPE zcl_dyn_record_handler=>ty_result.
 
       CASE ls_request-actiontype.
-        WHEN zcl_excel_types=>c_action-create.
+        WHEN zcl_excel_pipeline=>c_action-create.
           ls_apply_result = zcl_dyn_record_handler=>create_record(
             iv_table_name = CONV tabname( ls_request-tablename )
             iv_record_data = ls_request-newdata ).
 
-        WHEN zcl_excel_types=>c_action-update.
+        WHEN zcl_excel_pipeline=>c_action-update.
           ls_apply_result = zcl_dyn_record_handler=>update_record(
             iv_table_name = CONV tabname( ls_request-tablename )
             iv_record_data = ls_request-newdata ).
 
-        WHEN zcl_excel_types=>c_action-delete.
+        WHEN zcl_excel_pipeline=>c_action-delete.
           ls_apply_result = zcl_dyn_record_handler=>delete_record(
             iv_table_name = CONV tabname( ls_request-tablename )
             iv_record_key = ls_request-recordkey ).
@@ -173,7 +173,7 @@ MESSAGE e046(z_gsu26sap04) INTO DATA(lv_default_reject_remark).
         ELSE lv_default_reject_remark ).
 
       IF ls_request-recordkey = 'BULK'.
-        DATA(ls_bulk_result) = zcl_excel_bulk_aprvl=>reject_bulk(
+        DATA(ls_bulk_result) = zcl_excel_pipeline=>reject_bulk(
           iv_aprvl_id = ls_request-aprvlid
           iv_remarks = lv_remarks ).
 

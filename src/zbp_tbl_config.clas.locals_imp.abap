@@ -376,7 +376,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDIF.
 
- DATA lt_batch_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA lt_batch_items TYPE zcl_excel_pipeline=>tt_item.
 
  LOOP AT lt_batch_refs INTO DATA(lr_batch_record).
  DATA(lv_batch_item_no) = sy-tabix.
@@ -417,9 +417,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ) TO lt_batch_items.
  ENDLOOP.
 
- DATA ls_batch_item TYPE zcl_excel_bulk_aprvl=>ty_item.
+ DATA ls_batch_item TYPE zcl_excel_pipeline=>ty_item.
  IF zcl_aprvl_util=>is_approval_required( ls_config-tablename ) = abap_true.
- DATA lt_batch_submit_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA lt_batch_submit_items TYPE zcl_excel_pipeline=>tt_item.
  DATA(lv_batch_skipped) = 0.
  DATA(lv_batch_skip_msg) = VALUE string( ).
 
@@ -443,7 +443,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDIF.
 
- DATA(ls_batch_submit) = zcl_excel_bulk_aprvl=>submit_bulk(
+ DATA(ls_batch_submit) = zcl_excel_pipeline=>submit_bulk(
  iv_table_name = CONV #( ls_config-tablename )
  it_items = lt_batch_submit_items ).
 
@@ -646,7 +646,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDIF.
 
- DATA lt_batch_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA lt_batch_items TYPE zcl_excel_pipeline=>tt_item.
  LOOP AT lt_batch_refs INTO DATA(lr_batch_record).
  DATA(lv_batch_item_no) = sy-tabix.
 
@@ -689,9 +689,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ) TO lt_batch_items.
  ENDLOOP.
 
- DATA ls_batch_item TYPE zcl_excel_bulk_aprvl=>ty_item.
+ DATA ls_batch_item TYPE zcl_excel_pipeline=>ty_item.
  IF zcl_aprvl_util=>is_approval_required( ls_config-tablename ) = abap_true.
- DATA lt_batch_submit_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA lt_batch_submit_items TYPE zcl_excel_pipeline=>tt_item.
  DATA(lv_batch_skipped) = 0.
  DATA(lv_batch_skip_msg) = VALUE string( ).
 
@@ -723,7 +723,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDIF.
 
- DATA(ls_batch_submit) = zcl_excel_bulk_aprvl=>submit_bulk(
+ DATA(ls_batch_submit) = zcl_excel_pipeline=>submit_bulk(
  iv_table_name = CONV #( ls_config-tablename )
  it_items = lt_batch_submit_items ).
 
@@ -978,7 +978,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDIF.
 
- DATA lt_batch_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA lt_batch_items TYPE zcl_excel_pipeline=>tt_item.
 
  LOOP AT lt_batch_refs INTO DATA(lr_batch_record).
  DATA(lv_batch_item_no) = sy-tabix.
@@ -1020,9 +1020,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  ) TO lt_batch_items.
  ENDLOOP.
 
- DATA ls_batch_item TYPE zcl_excel_bulk_aprvl=>ty_item.
+ DATA ls_batch_item TYPE zcl_excel_pipeline=>ty_item.
  IF zcl_aprvl_util=>is_approval_required( ls_config-tablename ) = abap_true.
- DATA lt_batch_submit_items TYPE zcl_excel_bulk_aprvl=>tt_item.
+ DATA lt_batch_submit_items TYPE zcl_excel_pipeline=>tt_item.
  DATA(lv_batch_skipped) = 0.
  DATA(lv_batch_skip_msg) = VALUE string( ).
 
@@ -1046,7 +1046,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CONTINUE.
  ENDIF.
 
- DATA(ls_batch_submit) = zcl_excel_bulk_aprvl=>submit_bulk(
+ DATA(ls_batch_submit) = zcl_excel_pipeline=>submit_bulk(
  iv_table_name = CONV #( ls_config-tablename )
  it_items = lt_batch_submit_items ).
 
