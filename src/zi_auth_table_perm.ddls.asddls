@@ -10,9 +10,13 @@ define root view entity ZI_AUTH_TABLE_PERM
     and _AdminAccess.active_flag = 'X'
 {
   key table_name as TableName,
+      @Semantics.booleanIndicator: true
       can_view   as CanView,
+      @Semantics.booleanIndicator: true
       can_create as CanCreate,
+      @Semantics.booleanIndicator: true
       can_update as CanUpdate,
+      @Semantics.booleanIndicator: true
       can_delete as CanDelete,
 
   @Consumption.hidden: true

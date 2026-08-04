@@ -11,9 +11,13 @@ define root view entity ZI_AUTH_USER_PERM
 {
   key username   as Username,
   key table_name as TableName,
+      @Semantics.booleanIndicator: true
       can_view   as CanView,
+      @Semantics.booleanIndicator: true
       can_create as CanCreate,
+      @Semantics.booleanIndicator: true
       can_update as CanUpdate,
+      @Semantics.booleanIndicator: true
       can_delete as CanDelete
 }
 where _CurrentUser.role_type   = 'ADMIN'

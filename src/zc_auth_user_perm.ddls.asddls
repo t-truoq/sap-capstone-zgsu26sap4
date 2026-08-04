@@ -32,46 +32,18 @@ define root view entity ZC_AUTH_USER_PERM
 
   @UI.lineItem: [{ position: 30, label: 'View' }]
   @UI.identification: [{ position: 30, label: 'View' }]
-  @Consumption.valueHelpDefinition: [{
-    entity: {
-      name: 'ZI_YESNO_VH',
-      element: 'FlagValue'
-    },
-    useForValidation: true
-  }]
       CanView,
 
   @UI.lineItem: [{ position: 40, label: 'Create' }]
   @UI.identification: [{ position: 40, label: 'Create' }]
-  @Consumption.valueHelpDefinition: [{
-    entity: {
-      name: 'ZI_YESNO_VH',
-      element: 'FlagValue'
-    },
-    useForValidation: true
-  }]
       CanCreate,
 
   @UI.lineItem: [{ position: 50, label: 'Update' }]
   @UI.identification: [{ position: 50, label: 'Update' }]
-  @Consumption.valueHelpDefinition: [{
-    entity: {
-      name: 'ZI_YESNO_VH',
-      element: 'FlagValue'
-    },
-    useForValidation: true
-  }]
       CanUpdate,
 
   @UI.lineItem: [{ position: 60, label: 'Delete' }]
   @UI.identification: [{ position: 60, label: 'Delete' }]
-  @Consumption.valueHelpDefinition: [{
-    entity: {
-      name: 'ZI_YESNO_VH',
-      element: 'FlagValue'
-    },
-    useForValidation: true
-  }]
       CanDelete
 
 }
