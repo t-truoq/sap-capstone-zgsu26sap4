@@ -379,3 +379,4 @@ METHOD log_change.
   ENDMETHOD.
 
 ENDCLASS.
+

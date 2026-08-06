@@ -47,12 +47,12 @@ CLASS-METHODS get_auth_by_status
       IMPORTING iv_username   TYPE syuname DEFAULT sy-uname
                 iv_table_name TYPE ztde_table_name
                 iv_action     TYPE char20
-      RAISING   zcx_excel_pipeline.
+      RAISING   zcx_error.
 
     CLASS-METHODS check_admin_action
       IMPORTING iv_username TYPE syuname DEFAULT sy-uname
                 iv_action   TYPE char20
-      RAISING   zcx_excel_pipeline.
+      RAISING   zcx_error.
 
 CLASS-METHODS sync_user
       IMPORTING iv_username    TYPE syuname
@@ -132,8 +132,10 @@ METHOD get_auth_by_status.
       INTO @DATA(lv_active_flag).
 
     IF lv_active_flag <> abap_true.
-      RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |User { iv_username } is not active|.
+      RAISE EXCEPTION TYPE zcx_error
+        EXPORTING
+          textid      = zcx_error=>user_not_found_or_inactive
+          iv_username = iv_username.
     ENDIF.
 
     "An active table configuration is the mandatory global gate.
@@ -144,8 +146,10 @@ METHOD get_auth_by_status.
       INTO @DATA(lv_table_active).
 
     IF lv_table_active <> abap_true.
-      RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |Table { iv_table_name } is not active|.
+      RAISE EXCEPTION TYPE zcx_error
+        EXPORTING
+          textid       = zcx_error=>table_not_active
+          iv_table_name = CONV string( iv_table_name ).
     ENDIF.
 
     "ADMIN has full data permissions for every active configured table.
@@ -171,8 +175,12 @@ METHOD get_auth_by_status.
         RETURN.
       ENDIF.
 
-      RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |User { iv_username } is not allowed to { iv_action } on { iv_table_name }|.
+      RAISE EXCEPTION TYPE zcx_error
+        EXPORTING
+          textid       = zcx_error=>no_permission_on_table
+          iv_username  = iv_username
+          iv_action    = CONV string( iv_action )
+          iv_table_name = CONV string( iv_table_name ).
     ENDIF.
 
     "No explicit user row: fall back to the table default policy.
@@ -187,14 +195,19 @@ METHOD get_auth_by_status.
       ELSE abap_false ).
 
     IF lv_table_allowed <> abap_true.
-      RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |Table { iv_table_name } is not enabled for { iv_action }|.
+      RAISE EXCEPTION TYPE zcx_error
+        EXPORTING
+          textid       = zcx_error=>table_not_enabled_for_action
+          iv_table_name = CONV string( iv_table_name )
+          iv_action    = CONV string( iv_action ).
     ENDIF.
   ENDMETHOD.
   METHOD check_admin_action.
     IF is_admin( iv_username ) = abap_false.
-      RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |Action { iv_action } is only allowed for ADMIN|.
+      RAISE EXCEPTION TYPE zcx_error
+        EXPORTING
+          textid    = zcx_error=>action_admin_only
+          iv_action = CONV string( iv_action ).
     ENDIF.
   ENDMETHOD.
 METHOD sync_user.
@@ -359,5 +372,6 @@ METHOD sync_user.
   ENDMETHOD.
 
 ENDCLASS.
+
 
 

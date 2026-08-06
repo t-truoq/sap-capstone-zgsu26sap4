@@ -203,6 +203,7 @@ CLASS zcl_excel_pipeline DEFINITION
 
     CLASS-METHODS approve_bulk
       IMPORTING iv_aprvl_id      TYPE sysuuid_c32
+                iv_remarks       TYPE string OPTIONAL
       RETURNING VALUE(rs_result) TYPE ty_apply_result.
 
     CLASS-METHODS reject_bulk
@@ -1392,7 +1393,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
         UPDATE ztbl_aprvl
           SET status      = @c_status_approved,
               approved_by = @sy-uname,
-              approved_at = @lv_now
+              approved_at = @lv_now,
+              aprvl_comment = @iv_remarks
           WHERE aprvl_id = @iv_aprvl_id.
 
         DATA(lv_ok_msg) = |Bulk request approved and applied successfully ({ lines( lt_items ) } item(s)).| .
@@ -2132,23 +2134,38 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    DATA(lv_valid_from) = get_cell_value(
-      it_cells = it_cells
-      iv_field = 'VALID_FROM' ).
-    DATA(lv_valid_to) = get_cell_value(
-      it_cells = it_cells
-      iv_field = 'VALID_TO' ).
-    IF lv_valid_from IS NOT INITIAL AND lv_valid_to IS NOT INITIAL.
-      REPLACE ALL OCCURRENCES OF '-' IN lv_valid_from WITH ''.
-      REPLACE ALL OCCURRENCES OF '-' IN lv_valid_to WITH ''.
-      IF strlen( lv_valid_from ) = 8
-         AND strlen( lv_valid_to ) = 8
-         AND lv_valid_from CO '0123456789'
-         AND lv_valid_to CO '0123456789'
-         AND lv_valid_to < lv_valid_from.
-        APPEND |VALID_TO must be on or after VALID_FROM.| TO rt_errors.
+    TYPES: BEGIN OF ty_date_pair,
+             from_field TYPE fieldname,
+             to_field   TYPE fieldname,
+           END OF ty_date_pair,
+           ty_date_pairs TYPE STANDARD TABLE OF ty_date_pair WITH EMPTY KEY.
+    DATA(lt_date_pairs) = VALUE ty_date_pairs(
+      ( from_field = 'VALID_FROM' to_field = 'VALID_TO' )
+      ( from_field = 'START_DATE' to_field = 'END_DATE' ) ).
+    DATA lv_from_date TYPE string.
+    DATA lv_to_date   TYPE string.
+
+    LOOP AT lt_date_pairs INTO DATA(ls_date_pair).
+      lv_from_date = get_cell_value(
+        it_cells = it_cells
+        iv_field = ls_date_pair-from_field ).
+      lv_to_date = get_cell_value(
+        it_cells = it_cells
+        iv_field = ls_date_pair-to_field ).
+      IF lv_from_date IS INITIAL OR lv_to_date IS INITIAL.
+        CONTINUE.
       ENDIF.
-    ENDIF.
+
+      REPLACE ALL OCCURRENCES OF '-' IN lv_from_date WITH ''.
+      REPLACE ALL OCCURRENCES OF '-' IN lv_to_date WITH ''.
+      IF strlen( lv_from_date ) = 8
+         AND strlen( lv_to_date ) = 8
+         AND lv_from_date CO '0123456789'
+         AND lv_to_date CO '0123456789'
+         AND lv_to_date < lv_from_date.
+        APPEND |{ ls_date_pair-to_field } must be on or after { ls_date_pair-from_field }.| TO rt_errors.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD apply_diff_import.
@@ -3635,4 +3652,5 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
 
