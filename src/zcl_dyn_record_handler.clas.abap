@@ -1616,21 +1616,48 @@ METHOD build_where_clause.
       ENDIF.
     ENDLOOP.
 
-    ASSIGN COMPONENT 'VALID_FROM' OF STRUCTURE <record>
-      TO FIELD-SYMBOL(<valid_from>).
-    ASSIGN COMPONENT 'VALID_TO' OF STRUCTURE <record>
-      TO FIELD-SYMBOL(<valid_to>).
-    IF <valid_from> IS ASSIGNED
-       AND <valid_to> IS ASSIGNED
-       AND <valid_from> IS NOT INITIAL
-       AND <valid_to> IS NOT INITIAL
-       AND <valid_to> < <valid_from>.
-      APPEND VALUE #(
-        fieldname = 'VALID_TO'
-        value     = |{ <valid_to> }|
-        message   = |VALID_TO must be on or after VALID_FROM.| )
-        TO rt_errors.
-    ENDIF.
+    TYPES: BEGIN OF ty_date_pair,
+             from_field TYPE fieldname,
+             to_field   TYPE fieldname,
+           END OF ty_date_pair,
+           ty_date_pairs TYPE STANDARD TABLE OF ty_date_pair WITH EMPTY KEY.
+    DATA(lt_date_pairs) = VALUE ty_date_pairs(
+      ( from_field = 'VALID_FROM' to_field = 'VALID_TO' )
+      ( from_field = 'START_DATE' to_field = 'END_DATE' ) ).
+    FIELD-SYMBOLS <date_from> TYPE any.
+    FIELD-SYMBOLS <date_to>   TYPE any.
+    DATA lv_from_date TYPE string.
+    DATA lv_to_date   TYPE string.
+
+    LOOP AT lt_date_pairs INTO DATA(ls_date_pair).
+      UNASSIGN: <date_from>, <date_to>.
+      ASSIGN COMPONENT ls_date_pair-from_field OF STRUCTURE <record>
+        TO <date_from>.
+      ASSIGN COMPONENT ls_date_pair-to_field OF STRUCTURE <record>
+        TO <date_to>.
+      IF <date_from> IS NOT ASSIGNED
+         OR <date_to> IS NOT ASSIGNED
+         OR <date_from> IS INITIAL
+         OR <date_to> IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      lv_from_date = |{ <date_from> }|.
+      lv_to_date   = |{ <date_to> }|.
+      REPLACE ALL OCCURRENCES OF '-' IN lv_from_date WITH ''.
+      REPLACE ALL OCCURRENCES OF '-' IN lv_to_date WITH ''.
+      IF strlen( lv_from_date ) = 8
+         AND strlen( lv_to_date ) = 8
+         AND lv_from_date CO '0123456789'
+         AND lv_to_date CO '0123456789'
+         AND lv_to_date < lv_from_date.
+        APPEND VALUE #(
+          fieldname = ls_date_pair-to_field
+          value     = |{ <date_to> }|
+          message   = |{ ls_date_pair-to_field } must be on or after { ls_date_pair-from_field }.| )
+          TO rt_errors.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD validate_record_values.
@@ -1796,5 +1823,6 @@ METHOD build_where_clause.
   ENDMETHOD.
 
 ENDCLASS.
+
 
 
