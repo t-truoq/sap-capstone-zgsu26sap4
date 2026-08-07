@@ -41,7 +41,10 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD approve.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
-      MESSAGE e008(z_gsu26sap04) WITH 'APPROVE' INTO DATA(lv_msg_approve_admin).
+      DATA(lv_msg_approve_admin) = NEW zcx_error(
+        textid    = zcx_error=>action_admin_only
+        iv_action = 'APPROVE' )->get_text( ).
+
       LOOP AT keys INTO DATA(ls_approve_key).
         APPEND VALUE #(
           %tky = ls_approve_key-%tky
@@ -61,7 +64,10 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
-        MESSAGE e042(z_gsu26sap04) WITH ls_request-aprvlid INTO DATA(lv_msg_not_pending_a).
+        DATA(lv_msg_not_pending_a) = NEW zcx_error(
+          textid      = zcx_error=>bulk_request_not_pending
+          iv_aprvl_id = CONV #( ls_request-aprvlid ) )->get_text( ).
+
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
@@ -112,7 +118,9 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
             iv_record_key = ls_request-recordkey ).
 
         WHEN OTHERS.
-          MESSAGE e043(z_gsu26sap04) WITH ls_request-actiontype INTO DATA(lv_msg_unsupported).
+          DATA(lv_msg_unsupported) = NEW zcx_error(
+            textid         = zcx_error=>unsupported_bulk_action
+            iv_action_type = CONV #( ls_request-actiontype ) )->get_text( ).
           ls_apply_result = VALUE #(
             success = abap_false
             message = lv_msg_unsupported ).
@@ -142,7 +150,10 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD reject.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
-      MESSAGE e008(z_gsu26sap04) WITH 'REJECT' INTO DATA(lv_msg_reject_admin).
+      DATA(lv_msg_reject_admin) = NEW zcx_error(
+        textid    = zcx_error=>action_admin_only
+        iv_action = 'REJECT' )->get_text( ).
+
       LOOP AT keys INTO DATA(ls_reject_key).
         APPEND VALUE #(
           %tky = ls_reject_key-%tky
@@ -160,11 +171,15 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_requests).
 
-MESSAGE e046(z_gsu26sap04) INTO DATA(lv_default_reject_remark).
+    DATA(lv_default_reject_remark) = NEW zcx_error(
+      textid = zcx_error=>rejected_by_admin )->get_text( ).
 
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
-        MESSAGE e042(z_gsu26sap04) WITH ls_request-aprvlid INTO DATA(lv_msg_not_pending_r).
+        DATA(lv_msg_not_pending_r) = NEW zcx_error(
+          textid      = zcx_error=>bulk_request_not_pending
+          iv_aprvl_id = CONV #( ls_request-aprvlid ) )->get_text( ).
+
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
@@ -207,7 +222,10 @@ MESSAGE e046(z_gsu26sap04) INTO DATA(lv_default_reject_remark).
         WHERE aprvl_id = @ls_request-aprvlid
           AND status = 'PENDING'.
 
-      MESSAGE e044(z_gsu26sap04) WITH lv_remarks INTO DATA(lv_msg_rejected).
+      DATA(lv_msg_rejected) = NEW zcx_error(
+        textid     = zcx_error=>bulk_rejected_ok
+        iv_message = lv_remarks )->get_text( ).
+
       APPEND VALUE #(
         %tky = ls_request-%tky
         %param = VALUE #(

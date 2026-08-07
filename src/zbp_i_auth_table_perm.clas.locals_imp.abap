@@ -29,9 +29,11 @@ CLASS lhc_AuthTablePerm IMPLEMENTATION.
           TO failed-authtableperm.
         APPEND VALUE #(
           %tky = ls_permission-%tky
-          %msg = new_message_with_text(
+          %msg = new_message(
+            id       = zcx_error=>table_not_active-msgid
+            number   = zcx_error=>table_not_active-msgno
             severity = if_abap_behv_message=>severity-error
-            text = |Table { ls_permission-TableName } must have an active table configuration| )
+            v1       = CONV #( ls_permission-TableName ) )
           %element = VALUE #( TableName = if_abap_behv=>mk-on )
         ) TO reported-authtableperm.
       ENDIF.

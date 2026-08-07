@@ -70,7 +70,6 @@ CLASS zcl_table_lock DEFINITION
       RETURNING VALUE(rv_expires) TYPE timestampl.
 ENDCLASS.
 
-
 CLASS zcl_table_lock IMPLEMENTATION.
 
   METHOD now.
@@ -101,7 +100,7 @@ CLASS zcl_table_lock IMPLEMENTATION.
         RAISE EXCEPTION TYPE zcx_error
           EXPORTING
             textid        = zcx_error=>lock_owned_by_other_user
-            iv_table_name = CONV string( iv_table_name )
+            iv_table_name = CONV #( iv_table_name )
             iv_locked_by  = ls_existing-locked_by.
       ENDIF.
     ENDIF.
@@ -125,7 +124,7 @@ CLASS zcl_table_lock IMPLEMENTATION.
       RAISE EXCEPTION TYPE zcx_error
         EXPORTING
           textid        = zcx_error=>lock_session_missing
-          iv_table_name = CONV string( iv_table_name ).
+          iv_table_name = CONV #( iv_table_name ).
     ENDIF.
 
     DELETE FROM ztbl_lock
@@ -146,13 +145,13 @@ CLASS zcl_table_lock IMPLEMENTATION.
         RAISE EXCEPTION TYPE zcx_error
               EXPORTING
                 textid        = zcx_error=>lock_owned_by_other_user
-                iv_table_name = CONV string( iv_table_name )
+                iv_table_name = CONV #( iv_table_name )
                 iv_locked_by  = lv_locked_by.
       ELSE.
         RAISE EXCEPTION TYPE zcx_error
               EXPORTING
                 textid        = zcx_error=>lock_expired_or_missing
-                iv_table_name = CONV string( iv_table_name ).
+                iv_table_name = CONV #( iv_table_name ).
       ENDIF.
     ENDIF.
   ENDMETHOD.
@@ -173,7 +172,7 @@ CLASS zcl_table_lock IMPLEMENTATION.
       RAISE EXCEPTION TYPE zcx_error
             EXPORTING
               textid        = zcx_error=>lock_expired_or_missing
-              iv_table_name = CONV string( iv_table_name ).
+              iv_table_name = CONV #( iv_table_name ).
     ENDIF.
   ENDMETHOD.
 
@@ -193,7 +192,7 @@ CLASS zcl_table_lock IMPLEMENTATION.
       RAISE EXCEPTION TYPE zcx_error
             EXPORTING
               textid        = zcx_error=>lock_not_held_by_caller
-              iv_table_name = CONV string( iv_table_name )
+              iv_table_name = CONV #( iv_table_name )
               iv_locked_by  = ls_lock-locked_by.
     ENDIF.
   ENDMETHOD.
