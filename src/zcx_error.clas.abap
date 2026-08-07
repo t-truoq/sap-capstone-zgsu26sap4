@@ -1173,7 +1173,61 @@ CLASS zcx_error DEFINITION
         attr2 TYPE scx_attrname VALUE 'MV_COUNT2',
         attr3 TYPE scx_attrname VALUE '',
         attr4 TYPE scx_attrname VALUE '',
-      END OF commit_ok_summary.
+      END OF commit_ok_summary,
+
+      BEGIN OF record_created_ok,
+        msgid TYPE symsgid VALUE 'Z_GSU26SAP04',
+        msgno TYPE symsgno VALUE '128',
+        attr1 TYPE scx_attrname VALUE 'MV_RECORD_KEY',
+        attr2 TYPE scx_attrname VALUE '',
+        attr3 TYPE scx_attrname VALUE '',
+        attr4 TYPE scx_attrname VALUE '',
+      END OF record_created_ok,
+
+      BEGIN OF insert_failed_subrc,
+        msgid TYPE symsgid VALUE 'Z_GSU26SAP04',
+        msgno TYPE symsgno VALUE '129',
+        attr1 TYPE scx_attrname VALUE 'MV_TABLE_NAME',
+        attr2 TYPE scx_attrname VALUE 'MV_MESSAGE',
+        attr3 TYPE scx_attrname VALUE '',
+        attr4 TYPE scx_attrname VALUE '',
+      END OF insert_failed_subrc,
+
+      BEGIN OF record_updated_ok,
+        msgid TYPE symsgid VALUE 'Z_GSU26SAP04',
+        msgno TYPE symsgno VALUE '130',
+        attr1 TYPE scx_attrname VALUE 'MV_RECORD_KEY',
+        attr2 TYPE scx_attrname VALUE '',
+        attr3 TYPE scx_attrname VALUE '',
+        attr4 TYPE scx_attrname VALUE '',
+      END OF record_updated_ok,
+
+      BEGIN OF record_still_referenced,
+        msgid TYPE symsgid VALUE 'Z_GSU26SAP04',
+        msgno TYPE symsgno VALUE '131',
+        attr1 TYPE scx_attrname VALUE 'MV_TABLE_NAME',
+        attr2 TYPE scx_attrname VALUE '',
+        attr3 TYPE scx_attrname VALUE '',
+        attr4 TYPE scx_attrname VALUE '',
+      END OF record_still_referenced,
+
+      BEGIN OF record_deleted_ok,
+        msgid TYPE symsgid VALUE 'Z_GSU26SAP04',
+        msgno TYPE symsgno VALUE '132',
+        attr1 TYPE scx_attrname VALUE 'MV_RECORD_KEY',
+        attr2 TYPE scx_attrname VALUE '',
+        attr3 TYPE scx_attrname VALUE '',
+        attr4 TYPE scx_attrname VALUE '',
+      END OF record_deleted_ok,
+
+      BEGIN OF json_array_invalid,
+        msgid TYPE symsgid VALUE 'Z_GSU26SAP04',
+        msgno TYPE symsgno VALUE '133',
+        attr1 TYPE scx_attrname VALUE '',
+        attr2 TYPE scx_attrname VALUE '',
+        attr3 TYPE scx_attrname VALUE '',
+        attr4 TYPE scx_attrname VALUE '',
+      END OF json_array_invalid.
 
     METHODS constructor
       IMPORTING
@@ -1285,4 +1339,5 @@ CLASS zcx_error IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
 

@@ -87,7 +87,7 @@ TYPES:
       IMPORTING iv_table_name  TYPE tabname
                 iv_where      TYPE string
       RETURNING VALUE(rr_row)  TYPE REF TO data
-      RAISING   zcx_excel_pipeline
+      RAISING   zcx_error
                 cx_sy_dynamic_osql_error.
 
 CLASS-METHODS serialize
@@ -271,13 +271,18 @@ METHOD create_record.
 
           rs_result = VALUE #(
             success    = abap_true
-            message    = 'Record created successfully'
+            message    = NEW zcx_error(
+                            textid        = zcx_error=>record_created_ok
+                            iv_record_key = lv_key_j )->get_text( )
             record_key = CONV #( lv_key_j )
           ).
         ELSE.
           rs_result = VALUE #(
             success = abap_false
-            message = |Insert failed with sy-subrc = { sy-subrc }|
+            message = NEW zcx_error(
+                        textid        = zcx_error=>insert_failed_subrc
+                        iv_table_name = CONV string( iv_table_name )
+                        iv_message    = |sy-subrc = { sy-subrc }| )->get_text( )
           ).
         ENDIF.
 
@@ -331,7 +336,11 @@ METHOD create_record.
         IF sy-subrc <> 0.
           rs_result = VALUE #(
             success = abap_false
-            message = 'Record not found — may have been deleted'
+            message = NEW zcx_error(
+                        textid        = zcx_error=>record_no_longer_exists
+                        iv_record_key = zcl_dyn_record_handler=>build_key_json(
+                                           it_key_fields = lt_keys
+                                           ir_record     = lo_new ) )->get_text( )
           ).
           RETURN.
         ENDIF.
@@ -344,7 +353,11 @@ METHOD create_record.
             IF condense( |{ <lv_etag_db> }| ) <> condense( iv_etag_value ).
               rs_result = VALUE #(
                 success = abap_false
-                message = 'Optimistic lock failed: record was modified by another user'
+                message = NEW zcx_error(
+                            textid        = zcx_error=>record_changed_after_preview
+                            iv_record_key = zcl_dyn_record_handler=>build_key_json(
+                                               it_key_fields = lt_keys
+                                               ir_record     = lo_new ) )->get_text( )
               ).
               RETURN.
             ENDIF.
@@ -376,12 +389,16 @@ METHOD create_record.
         rs_result = COND #(
           WHEN sy-subrc = 0 THEN VALUE #(
             success    = abap_true
-            message    = 'Record updated successfully'
+            message    = NEW zcx_error(
+                            textid        = zcx_error=>record_updated_ok
+                            iv_record_key = lv_key_json )->get_text( )
             record_key = CONV #( lv_key_json )
           )
           ELSE VALUE #(
             success = abap_false
-            message = 'Update failed — record may not exist'
+            message = NEW zcx_error(
+                        textid        = zcx_error=>record_no_longer_exists
+                        iv_record_key = lv_key_json )->get_text( )
           )
         ).
 
@@ -450,13 +467,17 @@ METHOD create_record.
           ).
           rs_result = VALUE #(
             success    = abap_true
-            message    = 'Record deleted successfully'
+            message    = NEW zcx_error(
+                            textid        = zcx_error=>record_deleted_ok
+                            iv_record_key = CONV string( iv_record_key ) )->get_text( )
             record_key = iv_record_key
           ).
         ELSE.
           rs_result = VALUE #(
             success = abap_false
-            message = 'Delete failed — record may not exist'
+            message = NEW zcx_error(
+                        textid        = zcx_error=>record_no_longer_exists
+                        iv_record_key = CONV string( iv_record_key ) )->get_text( )
           ).
         ENDIF.
 
@@ -674,7 +695,9 @@ ENDMETHOD.
             ENDLOOP.
 
             IF lv_all_match = abap_true.
-              rv_error = |Cannot delete: record is referenced by table { ls_fk-tabname }|.
+              rv_error = NEW zcx_error(
+                textid        = zcx_error=>record_still_referenced
+                iv_table_name = CONV string( ls_fk-tabname ) )->get_text( ).
               RETURN.
             ENDIF.
           ENDLOOP.
@@ -771,7 +794,9 @@ ENDMETHOD.
                 TRANSLATE lv_candidate_text TO UPPER CASE.
 
                 IF lv_candidate_text = lv_parent_key_text.
-                  rv_error = |Cannot delete: record is referenced by table { lv_candidate_table }|.
+                  rv_error = NEW zcx_error(
+                    textid        = zcx_error=>record_still_referenced
+                    iv_table_name = CONV string( lv_candidate_table ) )->get_text( ).
                   RETURN.
                 ENDIF.
 
@@ -997,8 +1022,8 @@ METHOD serialize.
     DATA(lt_json_items) = split_json_array( iv_json_array ).
 
     IF lt_json_items IS INITIAL.
-      RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-        EXPORTING value = 'JSON array is empty or invalid'.
+      RAISE EXCEPTION TYPE zcx_error
+        EXPORTING textid = zcx_error=>json_array_invalid.
     ENDIF.
 
     LOOP AT lt_json_items INTO DATA(lv_item_json).
@@ -1157,8 +1182,9 @@ ENDMETHOD.
     FIELD-SYMBOLS <table> TYPE STANDARD TABLE.
     ASSIGN lr_table->* TO <table>.
     IF <table> IS NOT ASSIGNED OR <table> IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |No record found for WHERE: { iv_where }|.
+      RAISE EXCEPTION TYPE zcx_error
+        EXPORTING textid          = zcx_error=>no_record_found
+                  iv_where_clause = iv_where.
     ENDIF.
 
     READ TABLE <table> INDEX 1 ASSIGNING FIELD-SYMBOL(<row>).
@@ -1500,7 +1526,11 @@ METHOD build_where_clause.
               APPEND VALUE #(
                 fieldname = lv_fieldname
                 value     = lv_value
-                message   = |Field { lv_fieldname } value '{ lv_value }' is not allowed by domain { lv_config_domain }.| )
+                message   = NEW zcx_error(
+                              textid         = zcx_error=>field_invalid_domain
+                              iv_field_name  = CONV string( lv_fieldname )
+                              iv_message     = lv_value
+                              iv_domain_name = CONV string( lv_config_domain ) )->get_text( ) )
                 TO rt_errors.
             ENDIF.
             CONTINUE.
@@ -1533,7 +1563,10 @@ METHOD build_where_clause.
               APPEND VALUE #(
                 fieldname = lv_fieldname
                 value     = lv_value
-                message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
+                message   = NEW zcx_error(
+                              textid        = zcx_error=>field_fk_invalid
+                              iv_field_name = CONV string( lv_check_msg_field )
+                              iv_message    = lv_value )->get_text( ) )
                 TO rt_errors.
               CONTINUE.
             ENDIF.
@@ -1542,7 +1575,10 @@ METHOD build_where_clause.
             APPEND VALUE #(
               fieldname = lv_fieldname
               value     = lv_value
-              message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
+              message   = NEW zcx_error(
+                            textid        = zcx_error=>field_fk_invalid
+                            iv_field_name = CONV string( lv_check_msg_field )
+                            iv_message    = lv_value )->get_text( ) )
               TO rt_errors.
             CONTINUE.
           ENDIF.
@@ -1551,7 +1587,10 @@ METHOD build_where_clause.
             APPEND VALUE #(
               fieldname = lv_fieldname
               value     = lv_value
-              message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
+              message   = NEW zcx_error(
+                            textid        = zcx_error=>field_fk_invalid
+                            iv_field_name = CONV string( lv_check_msg_field )
+                            iv_message    = lv_value )->get_text( ) )
               TO rt_errors.
             CONTINUE.
           ENDIF.
@@ -1600,7 +1639,10 @@ METHOD build_where_clause.
           APPEND VALUE #(
             fieldname = lv_fieldname
             value     = lv_value
-            message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
+            message   = NEW zcx_error(
+                          textid        = zcx_error=>field_fk_invalid
+                          iv_field_name = CONV string( lv_check_msg_field )
+                          iv_message    = lv_value )->get_text( ) )
             TO rt_errors.
         ENDIF.
       ELSEIF ls_check-has_fixed = abap_true
@@ -1611,7 +1653,10 @@ METHOD build_where_clause.
         APPEND VALUE #(
           fieldname = lv_fieldname
           value     = lv_value
-          message   = |{ lv_fieldname } = '{ lv_value }' is not a valid fixed value| )
+          message   = NEW zcx_error(
+                        textid        = zcx_error=>field_invalid_domain
+                        iv_field_name = CONV string( lv_fieldname )
+                        iv_message    = |'{ lv_value }' is not a valid fixed value| )->get_text( ) )
           TO rt_errors.
       ENDIF.
     ENDLOOP.
@@ -1654,7 +1699,10 @@ METHOD build_where_clause.
         APPEND VALUE #(
           fieldname = ls_date_pair-to_field
           value     = |{ <date_to> }|
-          message   = |{ ls_date_pair-to_field } must be on or after { ls_date_pair-from_field }.| )
+          message   = NEW zcx_error(
+                        textid         = zcx_error=>date_range_invalid
+                        iv_field_name  = CONV string( ls_date_pair-to_field )
+                        iv_field_name2 = CONV string( ls_date_pair-from_field ) )->get_text( ) )
           TO rt_errors.
       ENDIF.
     ENDLOOP.
@@ -1823,6 +1871,7 @@ METHOD build_where_clause.
   ENDMETHOD.
 
 ENDCLASS.
+
 
 
 
