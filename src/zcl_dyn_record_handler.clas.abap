@@ -289,7 +289,7 @@ METHOD create_record.
     ENDTRY.
   ENDMETHOD.
 
-  METHOD update_record.
+METHOD update_record.
     TRY.
         DATA(lo_desc) = get_struct_desc( iv_table_name ).
 
@@ -336,12 +336,46 @@ METHOD create_record.
           RETURN.
         ENDIF.
 
-        "── Optimistic lock ──
+        " Serialize old record 1 lần — dùng chung cho etag check và audit log,
+        " đảm bảo format field (đặc biệt TIMESTAMPL/UTCLONG/RAW) khớp với giá trị
+        " FE đã nhận lúc load record ban đầu.
+        DATA(lv_old_json) = zcl_dyn_record_handler=>serialize( <ls_old> ).
+
+       "── Optimistic lock ──
         IF iv_etag_field IS NOT INITIAL AND iv_etag_value IS NOT INITIAL.
           ASSIGN COMPONENT iv_etag_field OF STRUCTURE <ls_old>
             TO FIELD-SYMBOL(<lv_etag_db>).
+
           IF sy-subrc = 0.
-            IF condense( |{ <lv_etag_db> }| ) <> condense( iv_etag_value ).
+            DATA(lv_etag_ok) = abap_false.
+
+            TRY.
+                " Parse iv_etag_value (format "yyyy-mm-dd hh:mm:ss.fffffff") thành timestampl
+                DATA lv_etag_parsed TYPE timestampl.
+                DATA(lv_etag_raw) = iv_etag_value.
+
+                DATA lv_date TYPE d.
+                DATA lv_time TYPE t.
+                lv_date = lv_etag_raw+0(4) && lv_etag_raw+5(2) && lv_etag_raw+8(2).
+                lv_time = lv_etag_raw+11(2) && lv_etag_raw+14(2) && lv_etag_raw+17(2).
+
+                CONVERT DATE lv_date TIME lv_time
+                  INTO TIME STAMP lv_etag_parsed TIME ZONE 'UTC'.
+
+                " So sánh dung sai 1 giây để tránh lệch precision khi round-trip qua DB
+                DATA(lv_diff) = abs( cl_abap_tstmp=>subtract(
+                  tstmp1 = CONV timestamp( <lv_etag_db> )
+                  tstmp2 = CONV timestamp( lv_etag_parsed ) ) ).
+
+                IF lv_diff <= 1.
+                  lv_etag_ok = abap_true.
+                ENDIF.
+              CATCH cx_root.
+                " parse fail → fallback so sánh chuỗi thô, giữ hành vi an toàn
+                lv_etag_ok = boolc( condense( |{ <lv_etag_db> }| ) = condense( iv_etag_value ) ).
+            ENDTRY.
+
+            IF lv_etag_ok = abap_false.
               rs_result = VALUE #(
                 success = abap_false
                 message = 'Optimistic lock failed: record was modified by another user'
@@ -351,7 +385,6 @@ METHOD create_record.
           ENDIF.
         ENDIF.
 
-        DATA(lv_old_json) = zcl_dyn_record_handler=>serialize( <ls_old> ).
         DATA(lv_key_json) = zcl_dyn_record_handler=>build_key_json(
           it_key_fields = lt_keys
           ir_record     = lo_new
@@ -392,7 +425,6 @@ METHOD create_record.
         ).
     ENDTRY.
   ENDMETHOD.
-
   METHOD delete_record.
     TRY.
         DATA(lo_desc) = get_struct_desc( iv_table_name ).
