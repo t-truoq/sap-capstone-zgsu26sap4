@@ -201,10 +201,10 @@ CLASS zcl_excel_pipeline DEFINITION
                 it_items         TYPE tt_item
       RETURNING VALUE(rs_result) TYPE ty_submit_result.
 
-    CLASS-METHODS approve_bulk
-      IMPORTING iv_aprvl_id      TYPE sysuuid_c32
-                iv_remarks       TYPE string OPTIONAL
-      RETURNING VALUE(rs_result) TYPE ty_apply_result.
+  CLASS-METHODS approve_bulk
+  IMPORTING iv_aprvl_id      TYPE sysuuid_c32
+            iv_remarks       TYPE string OPTIONAL
+  RETURNING VALUE(rs_result) TYPE ty_apply_result.
 
     CLASS-METHODS reject_bulk
       IMPORTING iv_aprvl_id      TYPE sysuuid_c32
@@ -1416,15 +1416,13 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
-  METHOD approve_bulk.
+ METHOD approve_bulk.
     SELECT SINGLE * FROM ztbl_aprvl
       WHERE aprvl_id = @iv_aprvl_id
       INTO @DATA(ls_parent).
 
     IF sy-subrc <> 0.
-      DATA(lv_notfound_msg) = msg(
-        textid      = zcx_error=>bulk_request_not_found
-        iv_aprvl_id = CONV #( iv_aprvl_id ) ).
+      DATA(lv_notfound_msg) = |Bulk approval request { iv_aprvl_id } not found.|.
       rs_result = VALUE #( success = abap_false message = lv_notfound_msg ).
       RETURN.
     ENDIF.
@@ -1455,7 +1453,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
         DATA(lv_parent_audit_id) = cl_system_uuid=>create_uuid_c32_static( ).
         LOOP AT lt_items INTO DATA(ls_item).
           apply_single_item(
-            is_item           = ls_item
+            is_item            = ls_item
             iv_parent_audit_id = lv_parent_audit_id ).
         ENDLOOP.
 
@@ -1469,9 +1467,9 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
             AND status   = @c_status_pending.
 
         UPDATE ztbl_aprvl
-          SET status      = @c_status_approved,
-              approved_by = @sy-uname,
-              approved_at = @lv_now,
+          SET status        = @c_status_approved,
+              approved_by   = @sy-uname,
+              approved_at   = @lv_now,
               aprvl_comment = @iv_remarks
           WHERE aprvl_id = @iv_aprvl_id.
 
@@ -1499,8 +1497,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           success = abap_false
           message = lv_fail_msg ).
     ENDTRY.
-  ENDMETHOD.
-
+ENDMETHOD.
   METHOD reject_bulk.
     DATA(lv_now) = utclong_current( ).
     DATA(lv_default_remark) = msg( textid = zcx_error=>rejected_by_admin ).
@@ -2308,7 +2305,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           iv_field_name  = CONV #( ls_date_pair-to_field )
           iv_field_name2 = CONV #( ls_date_pair-from_field ) ) TO rt_errors.
       ENDIF.
-    ENDLOOP.
+    ENDIF.
   ENDMETHOD.
 
   METHOD apply_diff_import.

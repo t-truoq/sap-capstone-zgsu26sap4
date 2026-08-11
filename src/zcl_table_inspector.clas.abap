@@ -118,8 +118,7 @@ METHOD get_field_list.
 
     ENDLOOP.
   ENDMETHOD.
-
-  METHOD get_domain_values.
+METHOD get_domain_values.
     CLEAR rt_domain_values.
 
     SELECT domvalue_l AS value
@@ -156,6 +155,7 @@ METHOD get_field_list.
 
     DATA lv_value_table TYPE tabname.
     DATA lv_value_field TYPE fieldname.
+    DATA lv_desc_field   TYPE fieldname.
 
     SELECT SINGLE entitytab
       FROM dd01l
@@ -194,6 +194,45 @@ METHOD get_field_list.
       RETURN.
     ENDIF.
 
+    " ── Tìm description field: ưu tiên field CHAR khớp pattern tên phổ biến ──
+    DATA lt_desc_candidates TYPE STANDARD TABLE OF dd03l-fieldname WITH DEFAULT KEY.
+
+    SELECT fieldname
+      FROM dd03l
+      WHERE tabname   = @lv_value_table
+        AND as4local  = 'A'
+        AND keyflag   = @space
+        AND fieldname <> 'MANDT'
+        AND inttype   = 'C'
+        AND ( fieldname LIKE '%NAME%' OR fieldname LIKE '%BEZEI%'
+           OR fieldname LIKE '%TEXT%' OR fieldname LIKE '%TXT%'
+           OR fieldname LIKE '%DESC%' OR fieldname LIKE '%KTX%' )
+      ORDER BY position
+      INTO TABLE @lt_desc_candidates
+      UP TO 1 ROWS.
+
+    IF lt_desc_candidates IS NOT INITIAL.
+      lv_desc_field = lt_desc_candidates[ 1 ].
+    ELSE.
+      " Fallback: field CHAR đầu tiên không phải key/MANDT, length >= 10
+      CLEAR lt_desc_candidates.
+      SELECT fieldname
+        FROM dd03l
+        WHERE tabname   = @lv_value_table
+          AND as4local  = 'A'
+          AND keyflag   = @space
+          AND fieldname <> 'MANDT'
+          AND inttype   = 'C'
+          AND leng      >= 10
+        ORDER BY position
+        INTO TABLE @lt_desc_candidates
+        UP TO 1 ROWS.
+
+      IF lt_desc_candidates IS NOT INITIAL.
+        lv_desc_field = lt_desc_candidates[ 1 ].
+      ENDIF.
+    ENDIF.
+
     TRY.
         DATA(lo_struct_desc) = CAST cl_abap_structdescr(
           cl_abap_typedescr=>describe_by_name( lv_value_table ) ).
@@ -227,9 +266,26 @@ METHOD get_field_list.
             CONTINUE.
           ENDIF.
 
+          " ── Lấy description từ desc field nếu tìm được, else fallback = value ──
+          DATA lv_desc_text TYPE string.
+          CLEAR lv_desc_text.
+
+          IF lv_desc_field IS NOT INITIAL.
+            ASSIGN COMPONENT lv_desc_field OF STRUCTURE <ls_value_row>
+              TO FIELD-SYMBOL(<lv_desc>).
+            IF sy-subrc = 0.
+              lv_desc_text = |{ <lv_desc> }|.
+              CONDENSE lv_desc_text.
+            ENDIF.
+          ENDIF.
+
+          IF lv_desc_text IS INITIAL.
+            lv_desc_text = lv_value_text.
+          ENDIF.
+
           APPEND VALUE #(
             value       = lv_value_text
-            description = lv_value_text ) TO rt_domain_values.
+            description = lv_desc_text ) TO rt_domain_values.
         ENDLOOP.
       CATCH cx_root.
         CLEAR rt_domain_values.
@@ -313,31 +369,36 @@ METHOD get_label_from_dd04t.
     rv_exists = xsdbool( sy-subrc = 0 ).
   ENDMETHOD.
 
-  METHOD map_inttype_to_fe_type.
-    rv_fe_type = SWITCH string( iv_inttype
-      WHEN 'D' THEN 'date'
-      WHEN 'T' THEN 'time'
-      WHEN 'I' THEN 'integer'
-      WHEN 'F' THEN 'decimal'
-      WHEN 'P' THEN 'decimal'
-      WHEN 'X' THEN
-        COND string(
-          WHEN iv_leng = 1  THEN 'boolean'
-          WHEN iv_leng = 16 THEN 'uuid'
-          ELSE                   'text'
-        )
-      WHEN 'N' THEN
-        COND string(
-          WHEN iv_domname IS NOT INITIAL THEN 'domain'
-          ELSE                               'text'
-        )
-      ELSE
-        COND string(
-          WHEN iv_domname IS NOT INITIAL THEN 'domain'
-          ELSE                               'text'
-        )
-    ).
-  ENDMETHOD.
+METHOD map_inttype_to_fe_type.
+  rv_fe_type = SWITCH string( iv_inttype
+    WHEN 'D' THEN 'date'
+    WHEN 'T' THEN 'time'
+    WHEN 'I' THEN 'integer'
+    WHEN 'b' THEN 'integer'      " INT1
+    WHEN 's' THEN 'integer'      " INT2
+    WHEN '8' THEN 'integer'      " INT8
+    WHEN 'F' THEN 'decimal'
+    WHEN 'P' THEN 'decimal'
+    WHEN 'a' THEN 'decimal'      " DECFLOAT16
+    WHEN 'e' THEN 'decimal'      " DECFLOAT34
+    WHEN 'X' THEN
+      COND string(
+        WHEN iv_leng = 1  THEN 'boolean'
+        WHEN iv_leng = 16 THEN 'uuid'
+        ELSE                   'text'
+      )
+    WHEN 'N' THEN
+      COND string(
+        WHEN iv_domname IS NOT INITIAL THEN 'domain'
+        ELSE                               'text'
+      )
+    ELSE
+      COND string(
+        WHEN iv_domname IS NOT INITIAL THEN 'domain'
+        ELSE                               'text'
+      )
+  ).
+ENDMETHOD.
 
 ENDCLASS.
 

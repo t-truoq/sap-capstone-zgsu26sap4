@@ -77,18 +77,9 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      READ TABLE keys INTO DATA(ls_key)
-        WITH KEY primary_key COMPONENTS %tky = ls_request-%tky ##PRIMKEY[ID].
-
-      DATA(lv_remarks) = COND string(
-        WHEN sy-subrc = 0 AND ls_key-%param-remarks IS NOT INITIAL
-        THEN ls_key-%param-remarks
-        ELSE `` ).
-
       IF ls_request-recordkey = 'BULK'.
         DATA(ls_bulk_result) = zcl_excel_pipeline=>approve_bulk(
-          iv_aprvl_id = ls_request-aprvlid
-          iv_remarks  = lv_remarks ).
+          iv_aprvl_id = ls_request-aprvlid ).
 
         APPEND VALUE #(
           %tky = ls_request-%tky
@@ -129,8 +120,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
       IF ls_apply_result-success = abap_true.
         zcl_aprvl_util=>update_status(
           iv_aprvl_id = ls_request-aprvlid
-          iv_status   = 'APPROVED'
-          iv_remarks  = lv_remarks ).
+          iv_status = 'APPROVED' ).
 
         UPDATE ztbl_aprvl_item
           SET status = 'APPROVED',
