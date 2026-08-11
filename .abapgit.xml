@@ -8,6 +8,8 @@
    <IGNORE>
     <item>/src/zcx_error.clas.abap</item>
     <item>/src/zcx_error.clas.xml</item>
+    <item>/src/z_test251.prog.abap</item>
+    <item>/src/z_test251.prog.xml</item>
    </IGNORE>
   </DATA>
  </asx:values>

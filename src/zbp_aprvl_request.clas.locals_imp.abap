@@ -41,10 +41,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD approve.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
-      DATA(lv_msg_approve_admin) = NEW zcx_error(
-        textid    = zcx_error=>action_admin_only
-        iv_action = 'APPROVE' )->get_text( ).
-
+      MESSAGE e008(z_gsu26sap04) WITH 'APPROVE' INTO DATA(lv_msg_approve_admin).
       LOOP AT keys INTO DATA(ls_approve_key).
         APPEND VALUE #(
           %tky = ls_approve_key-%tky
@@ -64,10 +61,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
-        DATA(lv_msg_not_pending_a) = NEW zcx_error(
-          textid      = zcx_error=>bulk_request_not_pending
-          iv_aprvl_id = CONV #( ls_request-aprvlid ) )->get_text( ).
-
+        MESSAGE e042(z_gsu26sap04) WITH ls_request-aprvlid INTO DATA(lv_msg_not_pending_a).
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
@@ -77,9 +71,18 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
+      READ TABLE keys INTO DATA(ls_key)
+        WITH KEY primary_key COMPONENTS %tky = ls_request-%tky ##PRIMKEY[ID].
+
+      DATA(lv_remarks) = COND string(
+        WHEN sy-subrc = 0 AND ls_key-%param-remarks IS NOT INITIAL
+        THEN ls_key-%param-remarks
+        ELSE `` ).
+
       IF ls_request-recordkey = 'BULK'.
         DATA(ls_bulk_result) = zcl_excel_pipeline=>approve_bulk(
-          iv_aprvl_id = ls_request-aprvlid ).
+          iv_aprvl_id = ls_request-aprvlid
+          iv_remarks  = lv_remarks ).
 
         APPEND VALUE #(
           %tky = ls_request-%tky
@@ -109,9 +112,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
             iv_record_key = ls_request-recordkey ).
 
         WHEN OTHERS.
-          DATA(lv_msg_unsupported) = NEW zcx_error(
-            textid         = zcx_error=>unsupported_bulk_action
-            iv_action_type = CONV #( ls_request-actiontype ) )->get_text( ).
+          MESSAGE e043(z_gsu26sap04) WITH ls_request-actiontype INTO DATA(lv_msg_unsupported).
           ls_apply_result = VALUE #(
             success = abap_false
             message = lv_msg_unsupported ).
@@ -120,7 +121,8 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
       IF ls_apply_result-success = abap_true.
         zcl_aprvl_util=>update_status(
           iv_aprvl_id = ls_request-aprvlid
-          iv_status = 'APPROVED' ).
+          iv_status   = 'APPROVED'
+          iv_remarks  = lv_remarks ).
 
         UPDATE ztbl_aprvl_item
           SET status = 'APPROVED',
@@ -140,10 +142,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
 
   METHOD reject.
     IF zcl_auth_helper=>is_admin( ) <> abap_true.
-      DATA(lv_msg_reject_admin) = NEW zcx_error(
-        textid    = zcx_error=>action_admin_only
-        iv_action = 'REJECT' )->get_text( ).
-
+      MESSAGE e008(z_gsu26sap04) WITH 'REJECT' INTO DATA(lv_msg_reject_admin).
       LOOP AT keys INTO DATA(ls_reject_key).
         APPEND VALUE #(
           %tky = ls_reject_key-%tky
@@ -161,15 +160,11 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WITH CORRESPONDING #( keys )
       RESULT DATA(lt_requests).
 
-    DATA(lv_default_reject_remark) = NEW zcx_error(
-      textid = zcx_error=>rejected_by_admin )->get_text( ).
+MESSAGE e046(z_gsu26sap04) INTO DATA(lv_default_reject_remark).
 
     LOOP AT lt_requests INTO DATA(ls_request).
       IF ls_request-status <> 'PENDING'.
-        DATA(lv_msg_not_pending_r) = NEW zcx_error(
-          textid      = zcx_error=>bulk_request_not_pending
-          iv_aprvl_id = CONV #( ls_request-aprvlid ) )->get_text( ).
-
+        MESSAGE e042(z_gsu26sap04) WITH ls_request-aprvlid INTO DATA(lv_msg_not_pending_r).
         APPEND VALUE #(
           %tky = ls_request-%tky
           %param = VALUE #(
@@ -212,10 +207,7 @@ CLASS lhc_aprvlrequest IMPLEMENTATION.
         WHERE aprvl_id = @ls_request-aprvlid
           AND status = 'PENDING'.
 
-      DATA(lv_msg_rejected) = NEW zcx_error(
-        textid     = zcx_error=>bulk_rejected_ok
-        iv_message = lv_remarks )->get_text( ).
-
+      MESSAGE e044(z_gsu26sap04) WITH lv_remarks INTO DATA(lv_msg_rejected).
       APPEND VALUE #(
         %tky = ls_request-%tky
         %param = VALUE #(

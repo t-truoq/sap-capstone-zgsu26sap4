@@ -151,7 +151,7 @@ CLASS zcl_excel_pipeline DEFINITION
                 it_fields      TYPE zcl_table_inspector=>tt_field_info
                 iv_record_key  TYPE string
       RETURNING VALUE(rt_keys) TYPE string_table
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS build_where_from_cells
       IMPORTING iv_table_name   TYPE tabname
@@ -170,14 +170,14 @@ CLASS zcl_excel_pipeline DEFINITION
                 iv_record_key   TYPE string
                 it_fields       TYPE zcl_table_inspector=>tt_field_info
       RETURNING VALUE(rv_where) TYPE string
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS apply_cells_to_record
       IMPORTING iv_table_name TYPE tabname
                 it_cells      TYPE tt_cell
                 it_fields     TYPE zcl_table_inspector=>tt_field_info
       CHANGING  cr_record     TYPE REF TO data
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS build_merged_record
       IMPORTING iv_table_name TYPE tabname
@@ -188,23 +188,23 @@ CLASS zcl_excel_pipeline DEFINITION
       EXPORTING ev_old_json   TYPE string
                 ev_new_json   TYPE string
                 er_record     TYPE REF TO data
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS validate_approval_json
       IMPORTING iv_table_name TYPE tabname
                 iv_new_json   TYPE string
                 it_fields     TYPE zcl_table_inspector=>tt_field_info
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS submit_bulk
       IMPORTING iv_table_name    TYPE ztde_table_name
                 it_items         TYPE tt_item
       RETURNING VALUE(rs_result) TYPE ty_submit_result.
 
-  CLASS-METHODS approve_bulk
-  IMPORTING iv_aprvl_id      TYPE sysuuid_c32
-            iv_remarks       TYPE string OPTIONAL
-  RETURNING VALUE(rs_result) TYPE ty_apply_result.
+    CLASS-METHODS approve_bulk
+      IMPORTING iv_aprvl_id      TYPE sysuuid_c32
+                iv_remarks       TYPE string OPTIONAL
+      RETURNING VALUE(rs_result) TYPE ty_apply_result.
 
     CLASS-METHODS reject_bulk
       IMPORTING iv_aprvl_id      TYPE sysuuid_c32
@@ -215,64 +215,64 @@ CLASS zcl_excel_pipeline DEFINITION
       IMPORTING iv_table_name  TYPE tabname
                 it_rows        TYPE tt_parsed_row
       RETURNING VALUE(rt_diff) TYPE tt_diff_row
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS apply_diff_import
       IMPORTING iv_table_name     TYPE tabname
                 it_diff           TYPE tt_diff_row
                 iv_do_commit      TYPE abap_bool DEFAULT abap_true
       RETURNING VALUE(rs_summary) TYPE ty_summary
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS parse_excel
       IMPORTING iv_table_name TYPE tabname
                 iv_file       TYPE xstring
       EXPORTING et_rows       TYPE tt_parsed_row
                 et_messages   TYPE string_table
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS export_table
       IMPORTING iv_table_name          TYPE tabname
       RETURNING VALUE(rv_file_xstring) TYPE xstring
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS export_template
       IMPORTING iv_table_name          TYPE tabname
       RETURNING VALUE(rv_file_xstring) TYPE xstring
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS save_to_local
       IMPORTING iv_xstring  TYPE xstring
                 iv_filepath TYPE string
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS download_excel
       IMPORTING is_req        TYPE ty_download_req
       RETURNING VALUE(rs_res) TYPE ty_download_res
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS upload_excel
       IMPORTING is_req  TYPE ty_upload_req
       EXPORTING et_diff TYPE tt_diff_cds
                 ev_info TYPE string
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS run_confirm_import
       IMPORTING is_req       TYPE ty_commit_req
                 it_diff_cds  TYPE tt_diff_cds
       RETURNING VALUE(rs_res) TYPE ty_commit_res
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS parse_diff_json
       IMPORTING iv_json       TYPE string
       RETURNING VALUE(rt_cds) TYPE tt_diff_cds
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS download_excel_base64
       IMPORTING iv_table_name         TYPE tabname
                 iv_template_only      TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rv_file_base64) TYPE string
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS preview_import_base64
       IMPORTING iv_table_name  TYPE tabname
@@ -280,13 +280,13 @@ CLASS zcl_excel_pipeline DEFINITION
       EXPORTING et_rows        TYPE tt_parsed_row
                 et_diff        TYPE tt_diff_row
                 et_messages    TYPE string_table
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS confirm_import
       IMPORTING iv_table_name     TYPE tabname
                 it_diff           TYPE tt_diff_row
       RETURNING VALUE(rs_summary) TYPE ty_summary
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
   PRIVATE SECTION.
     CONSTANTS:
@@ -329,28 +329,6 @@ CLASS zcl_excel_pipeline DEFINITION
              last_row TYPE i,
            END OF ty_lov_range,
            tt_lov_range TYPE STANDARD TABLE OF ty_lov_range WITH EMPTY KEY.
-
-    "── NEW: helper to get a localized T100 message text WITHOUT raising.
-    "   Used everywhere a plain string message is needed (summary logs,
-    "   diff rows, etc.) instead of building free text with string templates.
-    CLASS-METHODS msg
-      IMPORTING
-        textid          LIKE if_t100_message=>t100key
-        iv_item_no      TYPE string OPTIONAL
-        iv_message      TYPE string OPTIONAL
-        iv_message2     TYPE string OPTIONAL
-        iv_action       TYPE string OPTIONAL
-        iv_table_name   TYPE string OPTIONAL
-        iv_record_key   TYPE string OPTIONAL
-        iv_missing_keys TYPE string OPTIONAL
-        iv_domain_name  TYPE string OPTIONAL
-        iv_field_name   TYPE string OPTIONAL
-        iv_field_name2  TYPE string OPTIONAL
-        iv_count        TYPE string OPTIONAL
-        iv_count2       TYPE string OPTIONAL
-        iv_count3       TYPE string OPTIONAL
-        iv_aprvl_id     TYPE string OPTIONAL
-      RETURNING VALUE(rv_text) TYPE string.
 
     CLASS-METHODS apply_single_item
       IMPORTING is_item            TYPE ztbl_aprvl_item
@@ -408,7 +386,7 @@ CLASS zcl_excel_pipeline DEFINITION
                 it_groups     TYPE tt_group
                 it_fields     TYPE zcl_table_inspector=>tt_field_info
       CHANGING  cs_summary    TYPE ty_summary
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS mark_preview_conflicts
       IMPORTING iv_table_name TYPE tabname
@@ -425,41 +403,40 @@ CLASS zcl_excel_pipeline DEFINITION
     CLASS-METHODS assert_no_pending_conflict
       IMPORTING iv_table_name TYPE ztde_table_name
                 iv_record_key TYPE ztde_record_key
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS get_current_snapshot
       IMPORTING iv_table_name      TYPE tabname
                 iv_record_key      TYPE ztde_record_key
       RETURNING VALUE(rv_snapshot) TYPE string
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS assert_current_state
       IMPORTING iv_table_name  TYPE tabname
                 iv_action_type TYPE ztde_action_type
                 iv_record_key  TYPE ztde_record_key
                 iv_old_data    TYPE string OPTIONAL
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS uses_entity_id_where
       IMPORTING iv_table_name TYPE tabname
                 it_fields     TYPE zcl_table_inspector=>tt_field_info
                 iv_record_key TYPE string
       RETURNING VALUE(rv_yes) TYPE abap_bool
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS append_admin_on_update
       IMPORTING iv_table_name TYPE tabname
       CHANGING  cv_set        TYPE string.
 
     CLASS-METHODS map_columns
-      IMPORTING io_worksheet       TYPE REF TO zcl_excel_worksheet
-                iv_max_col         TYPE i
-                iv_table_name      TYPE tabname
-                it_fields          TYPE zcl_table_inspector=>tt_field_info
-      EXPORTING et_colmap          TYPE tt_colmap
-                et_header_cols     TYPE tt_colnum
-                et_messages        TYPE string_table
-                ev_table_mismatch  TYPE abap_bool.
+      IMPORTING io_worksheet   TYPE REF TO zcl_excel_worksheet
+                iv_max_col     TYPE i
+                iv_table_name  TYPE tabname
+                it_fields      TYPE zcl_table_inspector=>tt_field_info
+      EXPORTING et_colmap      TYPE tt_colmap
+                et_header_cols TYPE tt_colnum
+                et_messages    TYPE string_table.
 
     CLASS-METHODS normalize
       IMPORTING iv_text        TYPE clike
@@ -467,17 +444,17 @@ CLASS zcl_excel_pipeline DEFINITION
 
     CLASS-METHODS validate_table_name
       IMPORTING iv_table_name TYPE tabname
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS get_field_metadata
       IMPORTING iv_table_name    TYPE tabname
       RETURNING VALUE(rt_fields) TYPE zcl_table_inspector=>tt_field_info
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS read_table_data
       IMPORTING iv_table_name  TYPE tabname
       RETURNING VALUE(rr_data) TYPE REF TO data
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS build_excel
       IMPORTING it_fields          TYPE zcl_table_inspector=>tt_field_info
@@ -486,7 +463,7 @@ CLASS zcl_excel_pipeline DEFINITION
                 iv_importable_only TYPE abap_bool DEFAULT abap_false
                 iv_tech_header     TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rv_xstring)  TYPE xstring
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS is_exportable_col
       IMPORTING is_field           TYPE zcl_table_inspector=>ty_field_info
@@ -507,7 +484,7 @@ CLASS zcl_excel_pipeline DEFINITION
                 iv_table_name  TYPE tabname
                 it_lov_ranges  TYPE tt_lov_range
                 it_export_cols TYPE tt_export_col
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS build_domain_lov_sheet
       IMPORTING iv_table_name    TYPE tabname
@@ -588,25 +565,6 @@ CLASS zcl_excel_pipeline DEFINITION
 ENDCLASS.
 
 CLASS zcl_excel_pipeline IMPLEMENTATION.
-
-  METHOD msg.
-    rv_text = NEW zcx_error(
-      textid          = textid
-      iv_item_no      = iv_item_no
-      iv_message      = iv_message
-      iv_message2     = iv_message2
-      iv_action       = iv_action
-      iv_table_name   = iv_table_name
-      iv_record_key   = iv_record_key
-      iv_missing_keys = iv_missing_keys
-      iv_domain_name  = iv_domain_name
-      iv_field_name   = iv_field_name
-      iv_field_name2  = iv_field_name2
-      iv_count        = iv_count
-      iv_count2       = iv_count2
-      iv_count3       = iv_count3
-      iv_aprvl_id     = iv_aprvl_id )->get_text( ).
-  ENDMETHOD.
 
   METHOD is_admin_field.
     DATA lv_fld TYPE string.
@@ -857,10 +815,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
             EXPORTING iv_json   = iv_record_key
             CHANGING  ca_record = lr_rec ).
         CATCH cx_root INTO DATA(lxj).
-          RAISE EXCEPTION TYPE zcx_error
-            EXPORTING
-              textid     = zcx_error=>record_key_json_invalid
-              iv_message = CONV #( lxj->get_text( ) ).
+          RAISE EXCEPTION TYPE zcx_excel_pipeline
+            EXPORTING iv_text = |record_key JSON không hợp lệ: { lxj->get_text( ) }|.
       ENDTRY.
       ASSIGN lr_rec->* TO FIELD-SYMBOL(<rec>).
       ASSIGN COMPONENT lv_eid_f OF STRUCTURE <rec> TO FIELD-SYMBOL(<eid>).
@@ -929,10 +885,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           EXPORTING iv_json   = iv_record_key
           CHANGING  ca_record = lr_rec ).
       CATCH cx_root INTO DATA(lxj).
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid     = zcx_error=>record_key_json_invalid
-            iv_message = CONV #( lxj->get_text( ) ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |record_key JSON không hợp lệ: { lxj->get_text( ) }|.
     ENDTRY.
 
     rv_where = zcl_dyn_record_handler=>build_where_clause(
@@ -941,9 +895,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       iv_keep_spaces = abap_true ).
 
     IF rv_where IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid = zcx_error=>where_from_record_key_failed.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = 'Không build được WHERE từ record_key.'.
     ENDIF.
   ENDMETHOD.
 
@@ -1010,10 +963,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           EXPORTING iv_json   = lv_json
           CHANGING  ca_record = cr_record ).
       CATCH cx_root INTO DATA(lx).
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid     = zcx_error=>field_assignment_failed
-            iv_message = CONV #( lx->get_text( ) ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |Gán field Excel lỗi: { lx->get_text( ) }|.
     ENDTRY.
   ENDMETHOD.
 
@@ -1030,10 +981,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
             EXPORTING iv_json   = iv_record_key
             CHANGING  ca_record = er_record ).
         CATCH cx_root INTO DATA(lx_new_key).
-          RAISE EXCEPTION TYPE zcx_error
-            EXPORTING
-              textid     = zcx_error=>generated_record_key_invalid
-              iv_message = CONV #( lx_new_key->get_text( ) ).
+          RAISE EXCEPTION TYPE zcx_excel_pipeline
+            EXPORTING iv_text = |Invalid generated record key: { lx_new_key->get_text( ) }|.
       ENDTRY.
     ENDIF.
 
@@ -1051,10 +1000,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       TRY.
           <wa> = <db_row>.
         CATCH cx_sy_conversion_not_supported INTO DATA(lx_copy).
-          RAISE EXCEPTION TYPE zcx_error
-            EXPORTING
-              textid     = zcx_error=>copy_db_row_failed
-              iv_message = CONV #( lx_copy->get_text( ) ).
+          RAISE EXCEPTION TYPE zcx_excel_pipeline
+            EXPORTING iv_text = |Copy DB row: { lx_copy->get_text( ) }|.
       ENDTRY.
       ev_old_json = zcl_dyn_record_handler=>serialize( <wa> ).
     ENDIF.
@@ -1255,9 +1202,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
 
   METHOD validate_approval_json.
     IF iv_new_json IS INITIAL OR iv_new_json = '{}'.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid = zcx_error=>approval_data_empty.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = 'new_data approval rỗng — không gửi duyệt được.'.
     ENDIF.
 
     DATA lr_test TYPE REF TO data.
@@ -1267,10 +1213,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           EXPORTING iv_json   = iv_new_json
           CHANGING  ca_record = lr_test ).
       CATCH cx_root INTO DATA(lx_des).
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid     = zcx_error=>approval_deserialize_failed
-            iv_message = CONV #( lx_des->get_text( ) ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |new_data không deserialize được (Approve sẽ fail): { lx_des->get_text( ) }|.
     ENDTRY.
 
     ASSIGN lr_test->* TO FIELD-SYMBOL(<chk>).
@@ -1300,16 +1244,16 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
     ENDLOOP.
 
     IF lv_has_biz = abap_false.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>approval_data_field_mismatch
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text =
+          |new_data có JSON nhưng không map field nghiệp vụ vào { iv_table_name }. | &&
+          |Kiểm tra ZFLD_CONFIG: tên field phải trùng DDIC (vd COMPANY, không phải COMPANY_CODE).|.
     ENDIF.
   ENDMETHOD.
 
   METHOD submit_bulk.
     IF it_items IS INITIAL.
-      DATA(lv_msg_empty) = msg( textid = zcx_error=>no_records_to_submit ).
+      DATA(lv_msg_empty) = 'No records to submit for approval.' .
       rs_result = VALUE #( success = abap_false message = lv_msg_empty ).
       RETURN.
     ENDIF.
@@ -1324,11 +1268,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       INSERT lv_lock_key INTO TABLE lt_seen.
       IF sy-subrc <> 0.
         lv_skipped_count = lv_skipped_count + 1.
-        DATA(lv_dup_line) = msg(
-          textid        = zcx_error=>item_skipped_duplicate
-          iv_item_no    = CONV #( ls_check_item-item_no )
-          iv_record_key = CONV #( ls_check_item-record_key ) ).
-        lv_skip_message = |{ lv_skip_message } { lv_dup_line }|.
+        DATA(lv_dup_msg) = |{ lv_skip_message } Skipped item { ls_check_item-item_no }: duplicate record { ls_check_item-record_key }.| .
+        lv_skip_message = lv_dup_msg.
         CONTINUE.
       ENDIF.
 
@@ -1337,13 +1278,10 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
             iv_table_name = ls_check_item-table_name
             iv_record_key = ls_check_item-record_key ).
           APPEND ls_check_item TO lt_valid_items.
-        CATCH zcx_error INTO DATA(lx_pending).
+        CATCH zcx_excel_pipeline INTO DATA(lx_pending).
           lv_skipped_count = lv_skipped_count + 1.
-          DATA(lv_pending_line) = msg(
-            textid     = zcx_error=>item_skipped_pending
-            iv_item_no = CONV #( ls_check_item-item_no )
-            iv_message = lx_pending->get_text( ) ).
-          lv_skip_message = |{ lv_skip_message } { lv_pending_line }|.
+          DATA(lv_pending_msg) = |{ lv_skip_message } Skipped item { ls_check_item-item_no }: { lx_pending->get_text( ) }| .
+          lv_skip_message = lv_pending_msg.
       ENDTRY.
     ENDLOOP.
 
@@ -1357,9 +1295,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
         DATA(lv_now) = utclong_current( ).
         READ TABLE lt_valid_items INTO DATA(ls_first_item) INDEX 1.
 
-        DATA(lv_new_data_hdr) = msg(
-          textid   = zcx_error=>bulk_approval_summary
-          iv_count = CONV #( lines( lt_valid_items ) ) ).
+        DATA(lv_new_data_hdr) = |Bulk approval: { lines( lt_valid_items ) } item(s)| .
 
         INSERT ztbl_aprvl FROM @(
           VALUE ztbl_aprvl(
@@ -1375,9 +1311,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
 
         DATA lt_db_items TYPE STANDARD TABLE OF ztbl_aprvl_item.
         LOOP AT lt_valid_items INTO DATA(ls_item).
-          DATA(lv_item_msg) = msg(
-            textid     = zcx_error=>item_submitted
-            iv_item_no = CONV #( ls_item-item_no ) ).
+          DATA(lv_item_msg) = |Item { ls_item-item_no } submitted| .
           APPEND VALUE ztbl_aprvl_item(
             aprvl_id    = lv_aprvl_id
             item_no     = ls_item-item_no
@@ -1392,10 +1326,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
 
         INSERT ztbl_aprvl_item FROM TABLE @lt_db_items.
 
-        DATA(lv_submit_msg) = msg(
-          textid      = zcx_error=>bulk_submitted_ok
-          iv_aprvl_id = CONV #( lv_aprvl_id )
-          iv_count    = CONV #( lines( lt_db_items ) ) ).
+        DATA(lv_submit_msg) = |Bulk request submitted for approval (ID: { lv_aprvl_id }, items: { lines( lt_db_items ) })| .
 
         rs_result = VALUE #(
           success    = abap_true
@@ -1404,10 +1335,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           message    = lv_submit_msg ).
 
         IF lv_skipped_count > 0.
-          DATA(lv_partial) = msg(
-            textid   = zcx_error=>bulk_partial_skip
-            iv_count = CONV #( lv_skipped_count ) ).
-          DATA(lv_skip_suffix) = |{ rs_result-message } { lv_partial } { lv_skip_message }|.
+          DATA(lv_skip_suffix) = |{ rs_result-message } { lv_skipped_count } item(s) skipped.{ lv_skip_message }| .
           rs_result-message = lv_skip_suffix.
         ENDIF.
 
@@ -1416,21 +1344,19 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
- METHOD approve_bulk.
+  METHOD approve_bulk.
     SELECT SINGLE * FROM ztbl_aprvl
       WHERE aprvl_id = @iv_aprvl_id
       INTO @DATA(ls_parent).
 
     IF sy-subrc <> 0.
-      DATA(lv_notfound_msg) = |Bulk approval request { iv_aprvl_id } not found.|.
+      DATA(lv_notfound_msg) = |Bulk approval request { iv_aprvl_id } not found.| .
       rs_result = VALUE #( success = abap_false message = lv_notfound_msg ).
       RETURN.
     ENDIF.
 
     IF ls_parent-status <> c_status_pending.
-      DATA(lv_notpending_msg) = msg(
-        textid      = zcx_error=>bulk_request_not_pending
-        iv_aprvl_id = CONV #( iv_aprvl_id ) ).
+      DATA(lv_notpending_msg) = |Request { iv_aprvl_id } is not in PENDING status.| .
       rs_result = VALUE #( success = abap_false message = lv_notpending_msg ).
       RETURN.
     ENDIF.
@@ -1442,9 +1368,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       INTO TABLE @DATA(lt_items).
 
     IF lt_items IS INITIAL.
-      DATA(lv_noitem_msg) = msg(
-        textid      = zcx_error=>bulk_request_no_items
-        iv_aprvl_id = CONV #( iv_aprvl_id ) ).
+      DATA(lv_noitem_msg) = |Request { iv_aprvl_id } has no pending item.| .
       rs_result = VALUE #( success = abap_false message = lv_noitem_msg ).
       RETURN.
     ENDIF.
@@ -1453,12 +1377,12 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
         DATA(lv_parent_audit_id) = cl_system_uuid=>create_uuid_c32_static( ).
         LOOP AT lt_items INTO DATA(ls_item).
           apply_single_item(
-            is_item            = ls_item
+            is_item           = ls_item
             iv_parent_audit_id = lv_parent_audit_id ).
         ENDLOOP.
 
         DATA(lv_now) = utclong_current( ).
-        DATA(lv_applied_msg) = msg( textid = zcx_error=>applied_successfully ).
+        DATA(lv_applied_msg) = 'Applied successfully' .
 
         UPDATE ztbl_aprvl_item
           SET status  = @c_status_approved,
@@ -1467,15 +1391,13 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
             AND status   = @c_status_pending.
 
         UPDATE ztbl_aprvl
-          SET status        = @c_status_approved,
-              approved_by   = @sy-uname,
-              approved_at   = @lv_now,
+          SET status      = @c_status_approved,
+              approved_by = @sy-uname,
+              approved_at = @lv_now,
               aprvl_comment = @iv_remarks
           WHERE aprvl_id = @iv_aprvl_id.
 
-        DATA(lv_ok_msg) = msg(
-          textid   = zcx_error=>bulk_approved_ok
-          iv_count = CONV #( lines( lt_items ) ) ).
+        DATA(lv_ok_msg) = |Bulk request approved and applied successfully ({ lines( lt_items ) } item(s)).| .
 
         rs_result = VALUE #(
           success = abap_true
@@ -1489,18 +1411,17 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           WHERE aprvl_id = @iv_aprvl_id
             AND status   = @c_status_pending.
 
-        DATA(lv_fail_msg) = msg(
-          textid     = zcx_error=>bulk_approve_failed
-          iv_message = lv_error_text ).
+        DATA(lv_fail_msg) = |Bulk request failed. Nothing was marked approved: { lv_error_text }| .
 
         rs_result = VALUE #(
           success = abap_false
           message = lv_fail_msg ).
     ENDTRY.
-ENDMETHOD.
+  ENDMETHOD.
+
   METHOD reject_bulk.
     DATA(lv_now) = utclong_current( ).
-    DATA(lv_default_remark) = msg( textid = zcx_error=>rejected_by_admin ).
+    DATA(lv_default_remark) = 'Rejected by admin' .
     DATA(lv_remarks) = COND string(
       WHEN iv_remarks IS NOT INITIAL THEN iv_remarks ELSE lv_default_remark ).
 
@@ -1513,9 +1434,7 @@ ENDMETHOD.
         AND status   = @c_status_pending.
 
     IF sy-subrc <> 0.
-      DATA(lv_rejectfail_msg) = msg(
-        textid      = zcx_error=>bulk_reject_failed
-        iv_aprvl_id = CONV #( iv_aprvl_id ) ).
+      DATA(lv_rejectfail_msg) = |Reject failed for request { iv_aprvl_id }.| .
       rs_result = VALUE #( success = abap_false message = lv_rejectfail_msg ).
       RETURN.
     ENDIF.
@@ -1526,9 +1445,7 @@ ENDMETHOD.
       WHERE aprvl_id = @iv_aprvl_id
         AND status   = @c_status_pending.
 
-    DATA(lv_rejected_msg) = msg(
-      textid     = zcx_error=>bulk_rejected_ok
-      iv_message = lv_remarks ).
+    DATA(lv_rejected_msg) = |Bulk request rejected: { lv_remarks }| .
     rs_result = VALUE #( success = abap_true message = lv_rejected_msg ).
   ENDMETHOD.
 
@@ -1555,17 +1472,14 @@ ENDMETHOD.
           iv_parent_audit_id = iv_parent_audit_id ).
 
       WHEN OTHERS.
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid         = zcx_error=>unsupported_bulk_action
-            iv_action_type = CONV #( is_item-action_type ).
+        DATA(lv_unsupported_msg) = |Unsupported bulk item action { is_item-action_type }.| .
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = lv_unsupported_msg.
     ENDCASE.
 
     IF ls_result-success <> abap_true.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid     = zcx_error=>bulk_item_error
-          iv_message = CONV #( ls_result-message ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = ls_result-message.
     ENDIF.
   ENDMETHOD.
 
@@ -1577,10 +1491,8 @@ ENDMETHOD.
 
     DATA(lt_fields) = zcl_table_inspector=>get_field_list( iv_table_name ).
     IF lt_fields IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>table_not_configured
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Table { iv_table_name } is not configured in ZFLD_CONFIG. Configure fields before Excel import.|.
     ENDIF.
 
     DATA lt_biz_keys TYPE string_table.
@@ -1590,10 +1502,9 @@ ENDMETHOD.
     DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
 
     IF lt_biz_keys IS INITIAL AND lv_eid_f IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>no_importable_key_field
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Table { iv_table_name } has no importable key field for Excel diff. | &&
+                            |Set IS_KEY_FIELD = X for the business key in ZFLD_CONFIG.|.
     ENDIF.
 
     TYPES: BEGIN OF ty_kc,
@@ -1691,10 +1602,7 @@ ENDMETHOD.
                         table_name = iv_table_name
                         record_key = lv_fkey
                         status     = c_status-error
-                        message    = msg(
-                          textid        = zcx_error=>duplicate_key_in_file
-                          iv_record_key = lv_fkey
-                          iv_count      = CONV #( ls_kc-cnt ) ) ) TO rt_diff.
+                        message    = |Duplicate key in uploaded file ({ ls_kc-cnt } rows with the same key). Fix duplicate key { lv_fkey } before import.| ) TO rt_diff.
         CONTINUE.
       ENDIF.
 
@@ -1715,9 +1623,7 @@ ENDMETHOD.
                         table_name = iv_table_name
                         record_key = lv_fkey
                         status     = c_status-error
-                        message    = msg(
-                          textid    = zcx_error=>invalid_action_value
-                          iv_action = lv_requested_action ) ) TO rt_diff.
+                        message    = |Invalid __ACTION '{ lv_requested_action }'. Allowed values: C, CREATE, U, UPDATE, D, DELETE.| ) TO rt_diff.
         CONTINUE.
       ENDIF.
 
@@ -1732,9 +1638,7 @@ ENDMETHOD.
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = c_status-error
-                          message    = msg(
-                            textid        = zcx_error=>cannot_identify_delete_row
-                            iv_table_name = CONV #( iv_table_name ) ) ) TO rt_diff.
+                          message    = |Cannot identify record to delete for table { iv_table_name }. Check key columns.| ) TO rt_diff.
           CONTINUE.
         ENDIF.
 
@@ -1758,15 +1662,13 @@ ENDMETHOD.
                             old_value  = lv_old_json
                             new_value  = ''
                             status     = c_status-delete
-                            message    = msg( textid = zcx_error=>record_marked_delete ) ) TO rt_diff.
+                            message    = 'Record marked for deletion by __ACTION.' ) TO rt_diff.
           CATCH cx_root INTO DATA(lx_del).
             APPEND VALUE #( row_no     = ls_row-row_no
                             table_name = iv_table_name
                             record_key = lv_fkey
                             status     = c_status-error
-                            message    = msg(
-                              textid     = zcx_error=>delete_row_not_matching
-                              iv_message = lx_del->get_text( ) ) ) TO rt_diff.
+                            message    = |Delete row does not match an existing record: { lx_del->get_text( ) }| ) TO rt_diff.
         ENDTRY.
         CONTINUE.
       ENDIF.
@@ -1806,9 +1708,7 @@ ENDMETHOD.
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = c_status-error
-                          message    = msg(
-                            textid        = zcx_error=>missing_key_value_table
-                            iv_table_name = CONV #( iv_table_name ) ) ) TO rt_diff.
+                          message    = |Missing key value for table { iv_table_name }. Fill all key columns before import.| ) TO rt_diff.
           CONTINUE.
         ENDIF.
       ENDIF.
@@ -1838,9 +1738,7 @@ ENDMETHOD.
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = c_status-error
-                          message    = msg(
-                            textid        = zcx_error=>cannot_identify_target_row
-                            iv_table_name = CONV #( iv_table_name ) ) ) TO rt_diff.
+                          message    = |Cannot identify target record for table { iv_table_name }. Check key columns in the uploaded file.| ) TO rt_diff.
         ENDIF.
         CONTINUE.
       ENDIF.
@@ -1853,17 +1751,14 @@ ENDMETHOD.
                     iv_table_name = iv_table_name
                     iv_where      = lv_where ).
           lv_db_ok = abap_true.
-        CATCH zcx_error.
+        CATCH zcx_excel_pipeline.
           lv_db_ok = abap_false.
         CATCH cx_sy_dynamic_osql_error INTO DATA(lx).
           APPEND VALUE #( row_no     = ls_row-row_no
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = c_status-error
-                          message    = msg(
-                            textid        = zcx_error=>db_read_failed
-                            iv_table_name = CONV #( iv_table_name )
-                            iv_message    = lx->get_text( ) ) ) TO rt_diff.
+                          message    = |Database read failed for { iv_table_name }: { lx->get_text( ) }| ) TO rt_diff.
           CONTINUE.
       ENDTRY.
 
@@ -1873,9 +1768,8 @@ ENDMETHOD.
                           table_name = iv_table_name
                           record_key = lv_fkey
                           status     = c_status-error
-                          message    = msg(
-                            textid        = zcx_error=>entity_id_not_found
-                            iv_table_name = CONV #( iv_table_name ) ) ) TO rt_diff.
+                          message    = |ENTITY_ID from uploaded file does not exist in { iv_table_name }. | &&
+                                       |Download data/template from the current table and upload again.| ) TO rt_diff.
         ELSE.
           append_new_diff(
             EXPORTING iv_row_no     = ls_row-row_no
@@ -1907,7 +1801,7 @@ ENDMETHOD.
                         table_name = iv_table_name
                         record_key = lv_rkey
                         status     = c_status-unchanged
-                        message    = msg( textid = zcx_error=>no_changes_detected ) ) TO rt_diff.
+                        message    = 'No changes detected' ) TO rt_diff.
       ENDIF.
 
     ENDLOOP.
@@ -1939,9 +1833,7 @@ ENDMETHOD.
         iv_field = iv_entity_id_field ).
       IF lv_eid IS NOT INITIAL.
         IF is_valid_uuid_hex( lv_eid ) = abap_false.
-          rv_message = msg(
-            textid        = zcx_error=>entity_id_invalid
-            iv_field_name = CONV #( iv_entity_id_field ) ).
+          rv_message = |Invalid { iv_entity_id_field } value '{ lv_eid }'. Upload a downloaded { iv_table_name } file or leave the technical key blank for new rows.|.
           RETURN.
         ENDIF.
         RETURN.
@@ -1950,9 +1842,7 @@ ENDMETHOD.
       IF is_fk_key_field(
            iv_table_name = iv_table_name
            iv_field_name = iv_entity_id_field ) = abap_true.
-        rv_message = msg(
-          textid        = zcx_error=>missing_fk_key_value
-          iv_field_name = CONV #( iv_entity_id_field ) ).
+        rv_message = |Missing foreign-key key value { iv_entity_id_field }. Select a valid parent value before import.| .
         RETURN.
       ENDIF.
     ENDIF.
@@ -1984,18 +1874,15 @@ ENDMETHOD.
 
     IF lt_missing_columns IS NOT INITIAL.
       DATA(lv_missing) = concat_lines_of( table = lt_missing_columns sep = ', ' ).
-      rv_message = msg(
-        textid          = zcx_error=>table_key_mismatch
-        iv_table_name   = CONV #( iv_table_name )
-        iv_missing_keys = lv_missing ).
+      rv_message = |Uploaded file does not match the selected table { iv_table_name }. | &&
+                   |Missing key column(s): { lv_missing }. | &&
+                   |Select the correct table or download the template/data from { iv_table_name } and upload again.|.
       RETURN.
     ENDIF.
 
     IF lt_empty_values IS NOT INITIAL.
       DATA(lv_empty) = concat_lines_of( table = lt_empty_values sep = ', ' ).
-      rv_message = msg(
-        textid          = zcx_error=>missing_key_values
-        iv_missing_keys = lv_empty ).
+      rv_message = |Missing key value(s) for { lv_empty }. Fill the key column(s) before import.|.
     ENDIF.
   ENDMETHOD.
 
@@ -2109,9 +1996,7 @@ ENDMETHOD.
 
       IF ( ls_field-mandatory_flag = abap_true OR ls_field-mandatory_flag = 'X' )
          AND lv_val IS INITIAL.
-        APPEND msg(
-          textid        = zcx_error=>field_required
-          iv_field_name = CONV #( ls_field-field_name ) ) TO rt_errors.
+        APPEND |Field { ls_field-field_name } is required.| TO rt_errors.
         CONTINUE.
       ENDIF.
 
@@ -2120,10 +2005,7 @@ ENDMETHOD.
       ENDIF.
 
       IF ls_field-inttype = 'C' AND ls_field-leng > 0 AND strlen( lv_val ) > ls_field-leng.
-        APPEND msg(
-          textid        = zcx_error=>field_exceeds_length
-          iv_field_name = CONV #( ls_field-field_name )
-          iv_count      = CONV #( ls_field-leng ) ) TO rt_errors.
+        APPEND |Field { ls_field-field_name } exceeds max length { ls_field-leng }.| TO rt_errors.
       ENDIF.
 
       IF ls_field-inttype = 'D'.
@@ -2131,10 +2013,7 @@ ENDMETHOD.
         REPLACE ALL OCCURRENCES OF '-' IN lv_date_text WITH ''.
 
         IF strlen( lv_date_text ) <> 8 OR lv_date_text CN '0123456789'.
-          APPEND msg(
-            textid        = zcx_error=>field_invalid_date
-            iv_field_name = CONV #( ls_field-field_name )
-            iv_message    = lv_val ) TO rt_errors.
+          APPEND |Field { ls_field-field_name } value '{ lv_val }' is not a valid date.| TO rt_errors.
           CONTINUE.
         ENDIF.
 
@@ -2142,10 +2021,7 @@ ENDMETHOD.
             DATA(lv_date) = CONV d( lv_date_text ).
             DATA(lv_checked_date) = lv_date + 0.
           CATCH cx_root.
-            APPEND msg(
-              textid        = zcx_error=>field_invalid_date
-              iv_field_name = CONV #( ls_field-field_name )
-              iv_message    = lv_val ) TO rt_errors.
+            APPEND |Field { ls_field-field_name } value '{ lv_val }' is not a valid date.| TO rt_errors.
             CONTINUE.
         ENDTRY.
       ENDIF.
@@ -2166,11 +2042,7 @@ ENDMETHOD.
           IF lt_vals IS NOT INITIAL.
             READ TABLE lt_vals TRANSPORTING NO FIELDS WITH KEY value = lv_val.
             IF sy-subrc <> 0.
-              APPEND msg(
-                textid         = zcx_error=>field_invalid_domain
-                iv_field_name  = CONV #( ls_field-field_name )
-                iv_message     = lv_val
-                iv_domain_name = CONV #( ls_field-domain_name ) ) TO rt_errors.
+              APPEND |Field { ls_field-field_name } value '{ lv_val }' is not allowed by domain { ls_field-domain_name }.| TO rt_errors.
             ENDIF.
           ENDIF.
         ENDIF.
@@ -2236,18 +2108,12 @@ ENDMETHOD.
           INTO @DATA(ls_fk_dd03l).
         IF sy-subrc = 0.
           IF ls_fk_dd03l-leng > 0 AND strlen( lv_fk_value ) > ls_fk_dd03l-leng.
-            APPEND msg(
-              textid        = zcx_error=>field_fk_invalid
-              iv_field_name = lv_check_msg_field
-              iv_message    = lv_val ) TO rt_errors.
+            APPEND |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| TO rt_errors.
             CONTINUE.
           ENDIF.
           IF ( ls_fk_dd03l-inttype = 'N' OR ls_fk_dd03l-inttype = 'I' )
              AND lv_fk_value CN '0123456789'.
-            APPEND msg(
-              textid        = zcx_error=>field_fk_invalid
-              iv_field_name = lv_check_msg_field
-              iv_message    = lv_val ) TO rt_errors.
+            APPEND |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| TO rt_errors.
             CONTINUE.
           ENDIF.
         ENDIF.
@@ -2263,10 +2129,7 @@ ENDMETHOD.
             CLEAR lv_fk_exists.
         ENDTRY.
         IF lv_fk_exists = abap_false.
-          APPEND msg(
-            textid        = zcx_error=>field_fk_invalid
-            iv_field_name = lv_check_msg_field
-            iv_message    = lv_val ) TO rt_errors.
+          APPEND |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| TO rt_errors.
         ENDIF.
       ENDIF.
     ENDLOOP.
@@ -2300,12 +2163,9 @@ ENDMETHOD.
          AND lv_from_date CO '0123456789'
          AND lv_to_date CO '0123456789'
          AND lv_to_date < lv_from_date.
-        APPEND msg(
-          textid         = zcx_error=>date_range_invalid
-          iv_field_name  = CONV #( ls_date_pair-to_field )
-          iv_field_name2 = CONV #( ls_date_pair-from_field ) ) TO rt_errors.
+        APPEND |{ ls_date_pair-to_field } must be on or after { ls_date_pair-from_field }.| TO rt_errors.
       ENDIF.
-    ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD apply_diff_import.
@@ -2407,12 +2267,9 @@ ENDMETHOD.
             iv_table_name = CONV ztde_table_name( iv_table_name )
             iv_action     = lv_permission_action ).
           INSERT ls_permission_group INTO TABLE lt_authorized_groups.
-        CATCH zcx_error INTO DATA(lx_permission).
+        CATCH zcx_excel_pipeline INTO DATA(lx_permission).
           rs_summary-skipped_count = rs_summary-skipped_count + 1.
-          APPEND msg(
-            textid     = zcx_error=>skipped_row
-            iv_item_no = CONV #( ls_permission_group-row_no )
-            iv_message = lx_permission->get_text( ) )
+          APPEND |Row { ls_permission_group-row_no } skipped: { lx_permission->get_text( ) }|
             TO rs_summary-messages.
       ENDTRY.
     ENDLOOP.
@@ -2421,10 +2278,15 @@ ENDMETHOD.
     IF lt_groups IS INITIAL.
       rs_summary-error_count = rs_summary-error_count + 1.
       IF lv_action_row_count > 0.
-        APPEND msg( textid = zcx_error=>no_commit_groups_built ) TO rs_summary-messages.
+        APPEND 'Excel diff rows were received, but no commit groups could be built. Please preview the Excel file again and confirm with the latest diff.' TO rs_summary-messages.
       ELSE.
-        APPEND msg( textid = zcx_error=>no_diff_rows_for_commit ) TO rs_summary-messages.
+        APPEND 'No NEW/CHANGED/DELETE rows were received for commit. Please preview the Excel file again before confirming import.' TO rs_summary-messages.
       ENDIF.
+      RETURN.
+    ENDIF.
+
+    IF lt_groups IS INITIAL.
+      APPEND 'Không có dòng NEW/CHANGED/DELETE để commit.' TO rs_summary-messages.
       RETURN.
     ENDIF.
 
@@ -2435,10 +2297,8 @@ ENDMETHOD.
 
     DATA(lv_commit_eid_f) = get_entity_id_field( iv_table_name ).
     IF lt_keys IS INITIAL AND lv_commit_eid_f IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>no_importable_key_field
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Table { iv_table_name } không có key field importable để commit|.
     ENDIF.
 
     IF lv_approval_mode = abap_true.
@@ -2450,7 +2310,7 @@ ENDMETHOD.
         CHANGING  cs_summary    = rs_summary ).
 
       IF rs_summary-inserted_count = 0 AND rs_summary-updated_count = 0.
-        APPEND msg( textid = zcx_error=>no_valid_rows_submitted ) TO rs_summary-messages.
+        APPEND 'No valid Excel rows were submitted for approval.' TO rs_summary-messages.
         RETURN.
       ENDIF.
 
@@ -2458,11 +2318,7 @@ ENDMETHOD.
         COMMIT WORK AND WAIT.
       ENDIF.
 
-      APPEND msg(
-        textid    = zcx_error=>bulk_commit_summary
-        iv_count  = CONV #( rs_summary-inserted_count )
-        iv_count2 = CONV #( rs_summary-updated_count )
-        iv_count3 = CONV #( rs_summary-error_count ) ) TO rs_summary-messages.
+      APPEND |Đã gửi duyệt: C={ rs_summary-inserted_count }, U/D={ rs_summary-updated_count }, E={ rs_summary-error_count }. Chờ Approve trên UI.| TO rs_summary-messages.
       RETURN.
     ENDIF.
 
@@ -2556,9 +2412,7 @@ ENDMETHOD.
 
               IF lv_set IS INITIAL.
                 rs_summary-skipped_count = rs_summary-skipped_count + 1.
-                APPEND msg(
-                  textid     = zcx_error=>row_no_valid_field_update
-                  iv_item_no = CONV #( ls_group-row_no ) ) TO rs_summary-messages.
+                APPEND |Row { ls_group-row_no }: không có field hợp lệ để UPDATE.| TO rs_summary-messages.
                 CONTINUE.
               ENDIF.
 
@@ -2610,10 +2464,7 @@ ENDMETHOD.
               IF lv_fk_error_del IS NOT INITIAL.
                 rs_summary-error_count = rs_summary-error_count + 1.
                 rs_summary-skipped_count = rs_summary-skipped_count + 1.
-                APPEND msg(
-                  textid     = zcx_error=>row_delete_blocked
-                  iv_item_no = CONV #( ls_group-row_no )
-                  iv_message = lv_fk_error_del ) TO rs_summary-messages.
+                APPEND |Row { ls_group-row_no } delete blocked: { lv_fk_error_del }| TO rs_summary-messages.
                 CONTINUE.
               ENDIF.
 
@@ -2631,9 +2482,7 @@ ENDMETHOD.
               ELSE.
                 rs_summary-error_count = rs_summary-error_count + 1.
                 rs_summary-skipped_count = rs_summary-skipped_count + 1.
-                APPEND msg(
-                  textid     = zcx_error=>row_record_not_found_delete
-                  iv_item_no = CONV #( ls_group-row_no ) ) TO rs_summary-messages.
+                APPEND |Row { ls_group-row_no }: record not found for DELETE.| TO rs_summary-messages.
               ENDIF.
 
           ENDCASE.
@@ -2641,21 +2490,14 @@ ENDMETHOD.
         CATCH cx_root INTO DATA(lx).
           rs_summary-error_count = rs_summary-error_count + 1.
           rs_summary-skipped_count = rs_summary-skipped_count + 1.
-          APPEND msg(
-            textid     = zcx_error=>item_error
-            iv_item_no = CONV #( ls_group-row_no )
-            iv_message = lx->get_text( ) ) TO rs_summary-messages.
+          APPEND |Row { ls_group-row_no } commit lỗi: { lx->get_text( ) }| TO rs_summary-messages.
       ENDTRY.
     ENDLOOP.
 
     IF iv_do_commit = abap_true.
       COMMIT WORK AND WAIT.
     ENDIF.
-    APPEND msg(
-      textid    = zcx_error=>commit_done_summary
-      iv_count  = CONV #( rs_summary-inserted_count )
-      iv_count2 = CONV #( rs_summary-updated_count )
-      iv_count3 = CONV #( rs_summary-error_count ) ) TO rs_summary-messages.
+    APPEND |Commit xong: I={ rs_summary-inserted_count }, U/D={ rs_summary-updated_count }, E={ rs_summary-error_count }.| TO rs_summary-messages.
   ENDMETHOD.
 
   METHOD uses_entity_id_where.
@@ -2815,26 +2657,19 @@ ENDMETHOD.
             cs_summary-updated_count = cs_summary-updated_count + 1.
           ENDIF.
 
-        CATCH zcx_error INTO DATA(lx_pipe).
+        CATCH zcx_excel_pipeline INTO DATA(lx_pipe).
           cs_summary-skipped_count = cs_summary-skipped_count + 1.
-          APPEND msg(
-            textid     = zcx_error=>skipped_row
-            iv_item_no = CONV #( ls_group-row_no )
-            iv_message = lx_pipe->get_text( ) ) TO cs_summary-messages.
+          APPEND |Row { ls_group-row_no } skipped: { lx_pipe->get_text( ) }| TO cs_summary-messages.
         CATCH cx_root INTO DATA(lx).
           cs_summary-error_count = cs_summary-error_count + 1.
           cs_summary-skipped_count = cs_summary-skipped_count + 1.
           DATA(lv_cls) = cl_abap_classdescr=>describe_by_object_ref( lx )->get_relative_name( ).
-          APPEND msg(
-            textid      = zcx_error=>row_submit_failed
-            iv_item_no  = CONV #( ls_group-row_no )
-            iv_message  = lv_cls
-            iv_message2 = lx->get_text( ) ) TO cs_summary-messages.
+          APPEND |Row { ls_group-row_no } submit approval failed [{ lv_cls }]: { lx->get_text( ) }| TO cs_summary-messages.
       ENDTRY.
     ENDLOOP.
 
     IF lt_items IS INITIAL.
-      APPEND msg( textid = zcx_error=>no_valid_row_to_submit ) TO cs_summary-messages.
+      APPEND 'No valid Excel row to submit for approval.' TO cs_summary-messages.
       RETURN.
     ENDIF.
 
@@ -2843,17 +2678,12 @@ ENDMETHOD.
       it_items      = lt_items ).
 
     IF ls_submit-success = abap_true.
-      APPEND msg(
-        textid      = zcx_error=>bulk_submitted_ok
-        iv_aprvl_id = CONV #( ls_submit-aprvl_id )
-        iv_count    = CONV #( ls_submit-item_count ) ) TO cs_summary-messages.
+      APPEND |Excel bulk request submitted for approval: { ls_submit-aprvl_id } ({ ls_submit-item_count } item(s)).| TO cs_summary-messages.
     ELSE.
       cs_summary-error_count = cs_summary-error_count + lines( lt_items ).
       cs_summary-skipped_count = cs_summary-skipped_count + lines( lt_items ).
       CLEAR: cs_summary-inserted_count, cs_summary-updated_count.
-      APPEND msg(
-        textid     = zcx_error=>bulk_submit_failed
-        iv_message = ls_submit-message ) TO cs_summary-messages.
+      APPEND |Excel bulk approval submit failed: { ls_submit-message }| TO cs_summary-messages.
     ENDIF.
   ENDMETHOD.
 
@@ -2874,7 +2704,7 @@ ENDMETHOD.
           assert_no_pending_conflict(
             iv_table_name = CONV ztde_table_name( iv_table_name )
             iv_record_key = CONV ztde_record_key( ls_diff-record_key ) ).
-        CATCH zcx_error INTO DATA(lx_conflict).
+        CATCH zcx_excel_pipeline INTO DATA(lx_conflict).
           LOOP AT ct_diff ASSIGNING FIELD-SYMBOL(<conflict_diff>)
             WHERE row_no     = ls_diff-row_no
               AND record_key = ls_diff-record_key
@@ -2907,7 +2737,7 @@ ENDMETHOD.
           zcl_auth_helper=>check_permission(
             iv_table_name = CONV ztde_table_name( iv_table_name )
             iv_action     = lv_action ).
-        CATCH zcx_error INTO DATA(lx_permission).
+        CATCH zcx_excel_pipeline INTO DATA(lx_permission).
           LOOP AT ct_diff ASSIGNING FIELD-SYMBOL(<permission_diff>)
             WHERE row_no     = ls_diff-row_no
               AND record_key = ls_diff-record_key
@@ -2954,10 +2784,8 @@ ENDMETHOD.
         READ TABLE <rows> INDEX 1 ASSIGNING FIELD-SYMBOL(<row>).
         rv_snapshot = zcl_dyn_record_handler=>serialize( <row> ).
       CATCH cx_root INTO DATA(lx_read).
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid     = zcx_error=>snapshot_read_failed
-            iv_message = CONV #( lx_read->get_text( ) ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = lx_read->get_text( ).
     ENDTRY.
   ENDMETHOD.
 
@@ -2968,25 +2796,19 @@ ENDMETHOD.
 
     IF iv_action_type = c_action-create.
       IF lv_current IS NOT INITIAL.
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid        = zcx_error=>record_created_after_preview
-            iv_record_key = CONV #( iv_record_key ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |Record { iv_record_key } was created after preview.|.
       ENDIF.
       RETURN.
     ENDIF.
 
     IF lv_current IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>record_no_longer_exists
-          iv_record_key = CONV #( iv_record_key ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Record { iv_record_key } no longer exists.|.
     ENDIF.
     IF iv_old_data IS NOT INITIAL AND lv_current <> iv_old_data.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>record_changed_after_preview
-          iv_record_key = CONV #( iv_record_key ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Record { iv_record_key } changed after preview. Refresh and upload again.|.
     ENDIF.
   ENDMETHOD.
 
@@ -2998,10 +2820,8 @@ ENDMETHOD.
         DATA(lo_reader) = CAST zif_excel_reader( NEW zcl_excel_reader_2007( ) ).
         lo_excel = lo_reader->load( iv_file ).
       CATCH zcx_excel INTO DATA(lx_read).
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid     = zcx_error=>excel_read_failed
-            iv_message = CONV #( lx_read->get_text( ) ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |Cannot read Excel file: { lx_read->get_text( ) }|.
     ENDTRY.
 
     DATA(lo_ws)      = lo_excel->get_active_worksheet( ).
@@ -3009,44 +2829,42 @@ ENDMETHOD.
     DATA(lv_max_row) = CONV i( lo_ws->get_highest_row( ) ).
 
     IF lv_max_col = 0 OR lv_max_row < 2.
-      APPEND msg( textid = zcx_error=>excel_no_data_rows ) TO et_messages.
+      APPEND |Excel file has no data rows. Row 1 must be header; data starts from row 2.| TO et_messages.
       RETURN.
     ENDIF.
 
     DATA(lt_fields) = zcl_table_inspector=>get_field_list( iv_table_name ).
     IF lt_fields IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>table_not_configured
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Table { iv_table_name } is not configured in ZFLD_CONFIG. Configure fields before Excel import.|.
     ENDIF.
 
     DATA lt_colmap TYPE tt_colmap.
     DATA lt_header_cols TYPE tt_colnum.
-    DATA lv_table_mismatch TYPE abap_bool.
     map_columns(
-      EXPORTING io_worksheet      = lo_ws
-                iv_max_col        = lv_max_col
-                iv_table_name     = iv_table_name
-                it_fields         = lt_fields
-      IMPORTING et_colmap         = lt_colmap
-                et_header_cols    = lt_header_cols
-                et_messages       = DATA(lt_map_msg)
-                ev_table_mismatch = lv_table_mismatch ).
+      EXPORTING io_worksheet   = lo_ws
+                iv_max_col     = lv_max_col
+                iv_table_name  = iv_table_name
+                it_fields      = lt_fields
+      IMPORTING et_colmap      = lt_colmap
+                et_header_cols = lt_header_cols
+                et_messages    = DATA(lt_map_msg) ).
     APPEND LINES OF lt_map_msg TO et_messages.
 
-    IF lv_table_mismatch = abap_true.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>excel_table_mismatch
-          iv_table_name = CONV #( iv_table_name ).
-    ENDIF.
+    LOOP AT lt_map_msg INTO DATA(lv_map_msg).
+      IF lv_map_msg CS |does not belong to table|.
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |Uploaded Excel file does not match table { iv_table_name }. | &&
+                              |Header contains column(s) that do not belong to this table. | &&
+                              |Select the correct table or download the template/data from { iv_table_name } and upload again.|.
+      ENDIF.
+    ENDLOOP.
 
     IF lt_colmap IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>excel_table_mismatch
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Uploaded Excel file does not match table { iv_table_name }. | &&
+                            |No header column matches this table. | &&
+                            |Select the correct table or download the template/data from { iv_table_name } and upload again.|.
     ENDIF.
 
     DATA(lt_required_keys) = get_match_key_fields(
@@ -3064,11 +2882,10 @@ ENDMETHOD.
 
     IF lt_missing_keys IS NOT INITIAL.
       DATA(lv_missing_keys) = concat_lines_of( table = lt_missing_keys sep = ', ' ).
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid          = zcx_error=>excel_missing_key_columns
-          iv_table_name   = CONV #( iv_table_name )
-          iv_missing_keys = lv_missing_keys.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Uploaded Excel file does not match table { iv_table_name }. | &&
+                            |Missing required key column(s): { lv_missing_keys }. | &&
+                            |Select the correct table or download the template/data from { iv_table_name } and upload again.|.
     ENDIF.
 
     DATA lv_alpha TYPE zexcel_cell_column_alpha.
@@ -3110,19 +2927,13 @@ ENDMETHOD.
         ELSE.
           IF lv_str IS NOT INITIAL.
             DATA(lv_col_alpha) = zcl_excel_common=>convert_column2alpha( lv_col ).
-            DATA(lv_cellref) = |{ lv_col_alpha }{ lv_row }|.
 
             READ TABLE lt_header_cols TRANSPORTING NO FIELDS
               WITH KEY table_line = lv_col.
             IF sy-subrc = 0.
-              APPEND msg(
-                textid        = zcx_error=>cell_ignored_wrong_table
-                iv_message    = lv_cellref
-                iv_table_name = CONV #( iv_table_name ) ) TO et_messages.
+              APPEND |Ignored cell { lv_col_alpha }{ lv_row }: its header does not belong to table { iv_table_name }.| TO et_messages.
             ELSE.
-              APPEND msg(
-                textid     = zcx_error=>cell_ignored_outside_header
-                iv_message = lv_cellref ) TO et_messages.
+              APPEND |Ignored cell { lv_col_alpha }{ lv_row }: data is outside the Excel header area.| TO et_messages.
             ENDIF.
           ENDIF.
         ENDIF.
@@ -3137,13 +2948,11 @@ ENDMETHOD.
       lv_row = lv_row + 1.
     ENDWHILE.
 
-    APPEND msg(
-      textid   = zcx_error=>excel_parsed_rows
-      iv_count = CONV #( lines( et_rows ) ) ) TO et_messages.
+    APPEND |Parsed { lines( et_rows ) } data rows.| TO et_messages.
   ENDMETHOD.
 
   METHOD map_columns.
-    CLEAR: et_colmap, et_header_cols, et_messages, ev_table_mismatch.
+    CLEAR: et_colmap, et_header_cols, et_messages.
 
     DATA lv_alpha TYPE zexcel_cell_column_alpha.
     DATA lv_value TYPE zexcel_cell_value.
@@ -3171,10 +2980,7 @@ ENDMETHOD.
           READ TABLE et_colmap TRANSPORTING NO FIELDS
             WITH KEY fieldname = CONV fieldname( c_action_field ).
           IF sy-subrc = 0.
-            APPEND msg(
-              textid         = zcx_error=>column_duplicate_map
-              iv_field_name  = lv_value
-              iv_field_name2 = CONV #( c_action_field ) ) TO et_messages.
+            APPEND |Column '{ lv_value }' maps to field { c_action_field } more than once; duplicate column was ignored.| TO et_messages.
           ELSE.
             APPEND VALUE #( column    = lv_col
                             fieldname = CONV fieldname( c_action_field ) ) TO et_colmap.
@@ -3205,28 +3011,18 @@ ENDMETHOD.
         ENDIF.
 
         IF lv_found = abap_false.
-          ev_table_mismatch = abap_true.
-          APPEND msg(
-            textid        = zcx_error=>column_not_in_table
-            iv_field_name = lv_value
-            iv_table_name = CONV #( iv_table_name ) ) TO et_messages.
+          APPEND |Column '{ lv_value }' does not belong to table { iv_table_name } and was ignored.| TO et_messages.
         ELSE.
           READ TABLE it_fields INTO DATA(ls_matched) WITH KEY field_name = lv_match.
           IF sy-subrc = 0 AND is_parseable_column(
             is_field      = ls_matched
             iv_table_name = iv_table_name
             it_fields     = it_fields ) = abap_false.
-            APPEND msg(
-              textid         = zcx_error=>column_readonly_hidden
-              iv_field_name  = lv_value
-              iv_field_name2 = CONV #( lv_match ) ) TO et_messages.
+            APPEND |Column '{ lv_value }' ({ lv_match }) is readonly/hidden/system-managed and was ignored.| TO et_messages.
           ELSE.
             READ TABLE et_colmap TRANSPORTING NO FIELDS WITH KEY fieldname = lv_match.
             IF sy-subrc = 0.
-              APPEND msg(
-                textid         = zcx_error=>column_duplicate_map
-                iv_field_name  = lv_value
-                iv_field_name2 = CONV #( lv_match ) ) TO et_messages.
+              APPEND |Column '{ lv_value }' maps to field { lv_match } more than once; duplicate column was ignored.| TO et_messages.
             ELSE.
               APPEND VALUE #( column    = lv_col
                               fieldname = lv_match ) TO et_colmap.
@@ -3266,9 +3062,8 @@ ENDMETHOD.
 
   METHOD save_to_local.
     IF iv_xstring IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid = zcx_error=>excel_file_empty.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = 'File Excel rong, khong luu duoc.'.
     ENDIF.
 
     DATA lt_bin TYPE STANDARD TABLE OF x255.
@@ -3289,23 +3084,18 @@ ENDMETHOD.
 
   METHOD validate_table_name.
     IF iv_table_name IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid = zcx_error=>table_name_empty.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = 'Table name is empty'.
     ENDIF.
 
     IF iv_table_name NP 'Z*' AND iv_table_name NP 'Y*'.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>only_z_tables_allowed
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Only customer tables (Z*/Y*) are allowed: { iv_table_name }|.
     ENDIF.
 
     IF zcl_table_inspector=>table_exists( iv_table_name ) = abap_false.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>table_not_found
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Table not found: { iv_table_name }|.
     ENDIF.
   ENDMETHOD.
 
@@ -3313,10 +3103,8 @@ ENDMETHOD.
     rt_fields = zcl_table_inspector=>get_field_list( iv_table_name ).
 
     IF rt_fields IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>table_not_configured
-          iv_table_name = CONV #( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Table { iv_table_name } chưa được config trong ZFLD_CONFIG|.
     ENDIF.
   ENDMETHOD.
 
@@ -3326,10 +3114,8 @@ ENDMETHOD.
                     iv_table_name = iv_table_name
                     iv_max_rows   = 1000000 ).
       CATCH cx_sy_dynamic_osql_error INTO DATA(lx).
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid     = zcx_error=>table_data_read_failed
-            iv_message = CONV #( lx->get_text( ) ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |Read data failed: { lx->get_text( ) }|.
     ENDTRY.
   ENDMETHOD.
 
@@ -3472,10 +3258,8 @@ ENDMETHOD.
         rv_xstring = lo_writer->write_file( lo_excel ).
 
       CATCH zcx_excel INTO DATA(lx_excel).
-        RAISE EXCEPTION TYPE zcx_error
-          EXPORTING
-            textid     = zcx_error=>excel_build_failed
-            iv_message = CONV #( lx_excel->get_text( ) ).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |Excel build failed: { lx_excel->get_text( ) }|.
     ENDTRY.
   ENDMETHOD.
 
@@ -3705,9 +3489,7 @@ ENDMETHOD.
     ENDIF.
 
     rs_res-file_base64 = cl_http_utility=>encode_x_base64( lv_xstring ).
-    rs_res-message     = msg(
-      textid        = zcx_error=>download_ok
-      iv_table_name = CONV #( is_req-table_name ) ).
+    rs_res-message     = |Download OK: { is_req-table_name }|.
   ENDMETHOD.
 
   METHOD upload_excel.
@@ -3733,10 +3515,7 @@ ENDMETHOD.
       ev_info = concat_lines_of( table = lt_msg sep = |; | ).
     ENDIF.
 
-    DATA(lv_parsed_msg) = msg(
-      textid   = zcx_error=>upload_parsed_info
-      iv_count = CONV #( lines( lt_rows ) ) ).
-    ev_info = |{ lv_parsed_msg } { ev_info }|.
+    ev_info = |Parsed { lines( lt_rows ) } rows. { ev_info }|.
     CONDENSE ev_info.
   ENDMETHOD.
 
@@ -3746,7 +3525,7 @@ ENDMETHOD.
 
     IF it_diff_cds IS INITIAL.
       rs_res-error_count = 1.
-      rs_res-message = msg( textid = zcx_error=>no_diff_rows_for_commit ).
+      rs_res-message = 'No Excel diff rows were received for commit. Please preview the Excel file again before confirming import.'.
       RETURN.
     ENDIF.
 
@@ -3766,10 +3545,7 @@ ENDMETHOD.
     IF ls_sum-messages IS NOT INITIAL.
       rs_res-message = concat_lines_of( table = ls_sum-messages sep = |; | ).
     ELSE.
-      rs_res-message = msg(
-        textid    = zcx_error=>commit_ok_summary
-        iv_count  = CONV #( ls_sum-inserted_count )
-        iv_count2 = CONV #( ls_sum-updated_count ) ).
+      rs_res-message = |Commit OK: I={ ls_sum-inserted_count }, U={ ls_sum-updated_count }|.
     ENDIF.
   ENDMETHOD.
 
@@ -3831,11 +3607,10 @@ ENDMETHOD.
             CHANGING  data        = rt_cds ).
         ENDIF.
       CATCH cx_root INTO DATA(lx).
-        RAISE EXCEPTION TYPE zcx_error
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
           EXPORTING
-            previous   = lx
-            textid     = zcx_error=>diff_json_invalid
-            iv_message = CONV #( lx->get_text( ) ).
+            previous = lx
+            iv_text  = |Invalid diff_json: { lx->get_text( ) }|.
     ENDTRY.
   ENDMETHOD.
 
@@ -3877,4 +3652,3 @@ ENDMETHOD.
   ENDMETHOD.
 
 ENDCLASS.
-

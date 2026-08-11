@@ -38,22 +38,17 @@ CLASS zcl_tblconfig_validator IMPLEMENTATION.
 
   METHOD validate_tbl_name.
     IF iv_tabname IS INITIAL.
-      rs_result-error = NEW zcx_error(
-                           textid = zcx_error=>table_name_empty )->get_text( ).
+      rs_result-error = 'Table Name cannot be empty'.
       RETURN.
     ENDIF.
 
     IF iv_tabname(1) <> 'Z' AND iv_tabname(1) <> 'Y'.
-      rs_result-error = NEW zcx_error(
-                           textid       = zcx_error=>only_z_tables_allowed
-                           iv_table_name = CONV #( iv_tabname ) )->get_text( ).
+      rs_result-error = 'Only Z/Y tables are allowed'.
       RETURN.
     ENDIF.
 
     IF zcl_table_inspector=>ddic_table_exists( iv_tabname ) = abap_false.
-      rs_result-error = NEW zcx_error(
-                           textid       = zcx_error=>table_not_found
-                           iv_table_name = CONV #( iv_tabname ) )->get_text( ).
+      rs_result-error = |Table { iv_tabname } does not exist|.
       RETURN.
     ENDIF.
 
@@ -69,16 +64,13 @@ CLASS zcl_tblconfig_validator IMPLEMENTATION.
     ENDIF.
 
     IF sy-subrc = 0.
-      rs_result-error = NEW zcx_error(
-                           textid       = zcx_error=>table_already_registered
-                           iv_table_name = CONV #( iv_tabname ) )->get_text( ).
+      rs_result-error = |Table { iv_tabname } is already registered|.
     ENDIF.
   ENDMETHOD.
 
   METHOD validate_domain_req.
     IF iv_fieldtype = 'DOMAIN' AND iv_domainname IS INITIAL.
-      rv_error = NEW zcx_error(
-                   textid = zcx_error=>domain_name_required )->get_text( ).
+      rv_error = 'Domain Name is required when Field Type is DOMAIN'.
     ENDIF.
   ENDMETHOD.
 
@@ -92,10 +84,7 @@ CLASS zcl_tblconfig_validator IMPLEMENTATION.
       INTO @DATA(lv_exists).
 
     IF sy-subrc = 0.
-      rv_error = NEW zcx_error(
-                   textid           = zcx_error=>display_order_already_used
-                   iv_display_order = CONV #( |{ iv_displayorder }| )
-                   iv_table_name    = CONV #( iv_tablename ) )->get_text( ).
+      rv_error = |Display Order { iv_displayorder } already used in { iv_tablename }|.
     ENDIF.
   ENDMETHOD.
 

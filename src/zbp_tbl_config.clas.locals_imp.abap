@@ -56,8 +56,10 @@ CLASS lhc_tblconfig DEFINITION INHERITING FROM cl_abap_behavior_handler.
  IMPORTING iv_rollname TYPE rollname
  RETURNING VALUE(rv_label) TYPE dd04t-reptext.
 
+
  METHODS getfkvalues FOR MODIFY
   IMPORTING keys FOR ACTION tblconfig~getfkvalues RESULT result.
+
 
   "Ai helper
   METHODS getaidescription FOR MODIFY
@@ -150,10 +152,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  APPEND VALUE #( %tky = ls_field-%tky ) TO failed-fldconfig.
  APPEND VALUE #(
  %tky = ls_field-%tky
- %msg = new_message(
-   id       = 'Z_GSU26SAP04'
-   number   = '048'
-   severity = if_abap_behv_message=>severity-error )
+ %msg = new_message_with_text(
+ severity = if_abap_behv_message=>severity-error
+ text = 'Domain Name is required when Field Type is DOMAIN' )
  %element = VALUE #( domainname = if_abap_behv=>mk-on )
  ) TO reported-fldconfig.
  ENDIF.
@@ -201,10 +202,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  APPEND VALUE #( %tky = ls_config-%tky ) TO failed-tblconfig.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %msg = new_message(
-   id       = 'Z_GSU26SAP04'
-   number   = '023'
-   severity = if_abap_behv_message=>severity-error )
+ %msg = new_message_with_text(
+ severity = if_abap_behv_message=>severity-error
+ text = 'Table Name cannot be empty' )
  %element = VALUE #( tablename = if_abap_behv=>mk-on )
  ) TO reported-tblconfig.
  CONTINUE.
@@ -214,11 +214,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  APPEND VALUE #( %tky = ls_config-%tky ) TO failed-tblconfig.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %msg = new_message(
-   id       = 'Z_GSU26SAP04'
-   number   = '024'
-   v1       = ls_config-tablename
-   severity = if_abap_behv_message=>severity-error )
+ %msg = new_message_with_text(
+ severity = if_abap_behv_message=>severity-error
+ text = 'Only Z/Y tables are allowed' )
  %element = VALUE #( tablename = if_abap_behv=>mk-on )
  ) TO reported-tblconfig.
  CONTINUE.
@@ -234,11 +232,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  APPEND VALUE #( %tky = ls_config-%tky ) TO failed-tblconfig.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %msg = new_message(
-   id       = 'Z_GSU26SAP04'
-   number   = '025'
-   v1       = ls_config-tablename
-   severity = if_abap_behv_message=>severity-error )
+ %msg = new_message_with_text(
+ severity = if_abap_behv_message=>severity-error
+ text = |Table { ls_config-tablename } does not exist| )
  %element = VALUE #( tablename = if_abap_behv=>mk-on )
  ) TO reported-tblconfig.
  CONTINUE.
@@ -253,11 +249,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  APPEND VALUE #( %tky = ls_config-%tky ) TO failed-tblconfig.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %msg = new_message(
-   id       = 'Z_GSU26SAP04'
-   number   = '046'
-   v1       = ls_config-tablename
-   severity = if_abap_behv_message=>severity-error )
+ %msg = new_message_with_text(
+ severity = if_abap_behv_message=>severity-error
+ text = |Table { ls_config-tablename } is already registered| )
  %element = VALUE #( tablename = if_abap_behv=>mk-on )
  ) TO reported-tblconfig.
  ENDIF.
@@ -285,12 +279,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  APPEND VALUE #( %tky = ls_field-%tky ) TO failed-fldconfig.
  APPEND VALUE #(
  %tky = ls_field-%tky
- %msg = new_message(
-   id       = 'Z_GSU26SAP04'
-   number   = '047'
-   v1       = |{ ls_field-displayorder }|
-   v2       = ls_field-tablename
-   severity = if_abap_behv_message=>severity-error )
+ %msg = new_message_with_text(
+ severity = if_abap_behv_message=>severity-error
+ text = |Display Order { ls_field-displayorder } already used in { ls_field-tablename }| )
  %element = VALUE #( displayorder = if_abap_behv=>mk-on )
  ) TO reported-fldconfig.
  ENDIF.
@@ -351,10 +342,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  IF lv_record_data IS INITIAL.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
-   table_name = ls_config-tablename
-   success    = abap_false
-   message    = NEW zcx_error( textid = zcx_error=>record_data_empty )->get_text( ) )
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = 'Record data is empty' )
  ) TO result.
  CONTINUE.
  ENDIF.
@@ -366,13 +354,8 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  CATCH cx_root.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
-   table_name = ls_config-tablename
-   success    = abap_false
-   message    = NEW zcx_error(
-                   textid       = zcx_error=>invalid_table
-                iv_table_name = CONV #( ls_config-tablename ) )->get_text( ) )
-                 ) TO result.
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = 'Invalid table' )
+ ) TO result.
  CONTINUE.
  ENDTRY.
 
@@ -388,10 +371,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  IF lt_batch_refs IS INITIAL.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
-   table_name = ls_config-tablename
-   success    = abap_false
-   message    = NEW zcx_error( textid = zcx_error=>records_data_empty_or_invalid )->get_text( ) )
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = 'Records data is empty or invalid' )
  ) TO result.
  CONTINUE.
  ENDIF.
@@ -407,10 +387,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
      ir_record     = lr_batch_record ).
  IF lv_batch_validation_msg IS NOT INITIAL.
    RAISE EXCEPTION TYPE zcx_excel_pipeline
-     EXPORTING iv_text = NEW zcx_error(
-                            textid     = zcx_error=>row_validation_failed
-                            iv_item_no = |{ lv_batch_item_no }|
-                            iv_message = lv_batch_validation_msg )->get_text( ).
+     EXPORTING iv_text = |Row { lv_batch_item_no }: { lv_batch_validation_msg }|.
  ENDIF.
 
  zcl_dyn_record_handler=>on_create(
@@ -425,9 +402,7 @@ CLASS lhc_tblconfig IMPLEMENTATION.
 
  IF lv_batch_key IS INITIAL.
  RAISE EXCEPTION TYPE zcx_excel_pipeline
- EXPORTING iv_text = NEW zcx_error(
-                       textid     = zcx_error=>cannot_build_crud_key
-                       iv_item_no = |{ lv_batch_item_no }| )->get_text( ).
+ EXPORTING iv_text = |Cannot build key for CRUD row { lv_batch_item_no }|.
  ENDIF.
 
  ASSIGN lr_batch_record->* TO FIELD-SYMBOL(<ls_batch_record>).
@@ -454,17 +429,9 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  iv_table_name = ls_batch_item-table_name
  iv_record_key = ls_batch_item-record_key ).
  APPEND ls_batch_item TO lt_batch_submit_items.
-CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
+ CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
  lv_batch_skipped = lv_batch_skipped + 1.
- DATA(lv_skip_text) = NEW zcx_error(
-                         textid     = zcx_error=>skipped_row
-                         iv_item_no = |{ ls_batch_item-item_no }|
-                         iv_message = lx_batch_pending->get_text( ) )->get_text( ).
- IF lv_batch_skip_msg IS INITIAL.
- lv_batch_skip_msg = lv_skip_text.
- ELSE.
- lv_batch_skip_msg = |{ lv_batch_skip_msg } { lv_skip_text }|.
- ENDIF.
+ lv_batch_skip_msg = |{ lv_batch_skip_msg } Skipped row { ls_batch_item-item_no }: { lx_batch_pending->get_text( ) }|.
  ENDTRY.
  ENDLOOP.
 
@@ -500,17 +467,12 @@ CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
  iv_parent_audit_id = lv_parent_audit_id ).
  IF ls_batch_create-success <> abap_true.
  lv_batch_success = abap_false.
- lv_batch_message = |{ lv_batch_message }{ NEW zcx_error(
-                       textid     = zcx_error=>item_error
-                       iv_item_no = |{ ls_batch_item-item_no }|
-                       iv_message = ls_batch_create-message )->get_text( ) } |.
+ lv_batch_message = |{ lv_batch_message } Item { ls_batch_item-item_no }: { ls_batch_create-message }|.
  ENDIF.
  ENDLOOP.
 
-IF lv_batch_success = abap_true.
- lv_batch_message = NEW zcx_error(
-                       textid   = zcx_error=>created_n_records
-                       iv_count = |{ lines( lt_batch_items ) }| )->get_text( ).
+ IF lv_batch_success = abap_true.
+ lv_batch_message = |Created { lines( lt_batch_items ) } record(s) successfully|.
  ENDIF.
 
  APPEND VALUE #(
@@ -660,10 +622,8 @@ IF lv_batch_success = abap_true.
  %param = VALUE #(
  table_name = ls_config-tablename
  success = abap_false
- message = NEW zcx_error(
-             textid       = zcx_error=>invalid_table
-            iv_table_name = CONV #( ls_config-tablename ) )->get_text( )
-             )
+ message = 'Invalid table'
+ )
  ) TO result.
  CONTINUE.
  ENDTRY.
@@ -680,7 +640,7 @@ IF lv_batch_success = abap_true.
  %param = VALUE #(
  table_name = ls_config-tablename
  success = abap_false
- message = NEW zcx_error( textid = zcx_error=>records_data_empty_or_invalid )->get_text( )
+ message = 'Records data is empty or invalid'
  )
  ) TO result.
  CONTINUE.
@@ -696,10 +656,7 @@ IF lv_batch_success = abap_true.
      ir_record     = lr_batch_record ).
  IF lv_batch_update_validation_msg IS NOT INITIAL.
    RAISE EXCEPTION TYPE zcx_excel_pipeline
-     EXPORTING iv_text = NEW zcx_error(
-                            textid     = zcx_error=>row_validation_failed
-                            iv_item_no = |{ lv_batch_item_no }|
-                            iv_message = lv_batch_update_validation_msg )->get_text( ).
+     EXPORTING iv_text = |Row { lv_batch_item_no }: { lv_batch_update_validation_msg }|.
  ENDIF.
 
  DATA(lt_batch_keys) = zcl_dyn_record_handler=>get_key_fields(
@@ -713,9 +670,7 @@ IF lv_batch_success = abap_true.
 
  IF lv_batch_where IS INITIAL OR lv_batch_key IS INITIAL.
  RAISE EXCEPTION TYPE zcx_excel_pipeline
- EXPORTING iv_text = NEW zcx_error(
-                       textid     = zcx_error=>cannot_build_crud_key
-                       iv_item_no = |{ lv_batch_item_no }| )->get_text( ).
+ EXPORTING iv_text = |Cannot build key for CRUD row { lv_batch_item_no }|.
  ENDIF.
 
  DATA(lr_batch_old) = zcl_dyn_record_handler=>get_single_record(
@@ -746,12 +701,13 @@ IF lv_batch_success = abap_true.
  iv_table_name = ls_batch_item-table_name
  iv_record_key = ls_batch_item-record_key ).
  APPEND ls_batch_item TO lt_batch_submit_items.
-CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
+ CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
  lv_batch_skipped = lv_batch_skipped + 1.
- lv_batch_skip_msg = |{ lv_batch_skip_msg }{ NEW zcx_error(
-                       textid     = zcx_error=>skipped_row
-                       iv_item_no = |{ ls_batch_item-item_no }|
-                       iv_message = lx_batch_pending->get_text( ) )->get_text( ) } |.
+ IF lv_batch_skip_msg IS INITIAL.
+ lv_batch_skip_msg = |Skipped row { ls_batch_item-item_no }: { lx_batch_pending->get_text( ) }|.
+ ELSE.
+ lv_batch_skip_msg = |{ lv_batch_skip_msg } Skipped row { ls_batch_item-item_no }: { lx_batch_pending->get_text( ) }|.
+ ENDIF.
  ENDTRY.
  ENDLOOP.
 
@@ -792,19 +748,14 @@ CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
  iv_table_name = ls_config-tablename
  iv_record_data = ls_batch_item-new_data
  iv_parent_audit_id = lv_parent_audit_id ).
-IF ls_batch_update-success <> abap_true.
+ IF ls_batch_update-success <> abap_true.
  lv_batch_success = abap_false.
- lv_batch_message = |{ lv_batch_message }{ NEW zcx_error(
-                       textid     = zcx_error=>item_error
-                       iv_item_no = |{ ls_batch_item-item_no }|
-                       iv_message = ls_batch_update-message )->get_text( ) } |.
+ lv_batch_message = |{ lv_batch_message } Item { ls_batch_item-item_no }: { ls_batch_update-message }|.
  ENDIF.
  ENDLOOP.
 
-IF lv_batch_success = abap_true.
- lv_batch_message = NEW zcx_error(
-                       textid   = zcx_error=>updated_n_records
-                       iv_count = |{ lines( lt_batch_items ) }| )->get_text( ).
+ IF lv_batch_success = abap_true.
+ lv_batch_message = |Updated { lines( lt_batch_items ) } record(s) successfully|.
  ENDIF.
 
  APPEND VALUE #(
@@ -836,7 +787,7 @@ IF lv_batch_success = abap_true.
  %param = VALUE #(
  table_name = ls_config-tablename
  success = abap_false
- message = NEW zcx_error( textid = zcx_error=>record_data_empty )->get_text( )
+ message = 'Record data is empty'
  )
  ) TO result.
  CONTINUE.
@@ -991,7 +942,7 @@ IF lv_batch_success = abap_true.
  %param = VALUE #(
  table_name = ls_config-tablename
  success = abap_false
- message = NEW zcx_error( textid = zcx_error=>record_key_empty )->get_text( )
+ message = 'Record key is empty'
  )
  ) TO result.
  CONTINUE.
@@ -1007,10 +958,8 @@ IF lv_batch_success = abap_true.
  %param = VALUE #(
  table_name = ls_config-tablename
  success = abap_false
- message = NEW zcx_error(
-             textid       = zcx_error=>invalid_table
-            iv_table_name = CONV #( ls_config-tablename ) )->get_text( )
-             )
+ message = 'Invalid table'
+ )
  ) TO result.
  CONTINUE.
  ENDTRY.
@@ -1024,10 +973,7 @@ IF lv_batch_success = abap_true.
  IF lt_batch_refs IS INITIAL.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
-   table_name = ls_config-tablename
-   success    = abap_false
-   message    = NEW zcx_error( textid = zcx_error=>record_key_data_invalid )->get_text( ) )
+ %param = VALUE #( table_name = ls_config-tablename success = abap_false message = 'Record key data is empty or invalid' )
  ) TO result.
  CONTINUE.
  ENDIF.
@@ -1048,9 +994,7 @@ IF lv_batch_success = abap_true.
 
  IF lv_batch_where IS INITIAL OR lv_batch_key IS INITIAL.
  RAISE EXCEPTION TYPE zcx_excel_pipeline
- EXPORTING iv_text = NEW zcx_error(
-                       textid     = zcx_error=>cannot_build_crud_key
-                       iv_item_no = |{ lv_batch_item_no }| )->get_text( ).
+ EXPORTING iv_text = |Cannot build key for CRUD row { lv_batch_item_no }|.
  ENDIF.
 
  DATA(lv_batch_fk_error) = zcl_dyn_record_handler=>check_foreign_key(
@@ -1058,10 +1002,7 @@ IF lv_batch_success = abap_true.
  iv_record_key = CONV #( lv_batch_key ) ).
  IF lv_batch_fk_error IS NOT INITIAL.
  RAISE EXCEPTION TYPE zcx_excel_pipeline
- EXPORTING iv_text = NEW zcx_error(
-                       textid     = zcx_error=>row_validation_failed
-                       iv_item_no = |{ lv_batch_item_no }|
-                       iv_message = lv_batch_fk_error )->get_text( ).
+ EXPORTING iv_text = |Row { lv_batch_item_no }: { lv_batch_fk_error }|.
  ENDIF.
 
  DATA(lr_batch_old) = zcl_dyn_record_handler=>get_single_record(
@@ -1091,12 +1032,9 @@ IF lv_batch_success = abap_true.
  iv_table_name = ls_batch_item-table_name
  iv_record_key = ls_batch_item-record_key ).
  APPEND ls_batch_item TO lt_batch_submit_items.
-CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
+ CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
  lv_batch_skipped = lv_batch_skipped + 1.
- lv_batch_skip_msg = |{ lv_batch_skip_msg }{ NEW zcx_error(
-                       textid     = zcx_error=>skipped_row
-                       iv_item_no = |{ ls_batch_item-item_no }|
-                       iv_message = lx_batch_pending->get_text( ) )->get_text( ) } |.
+ lv_batch_skip_msg = |{ lv_batch_skip_msg } Skipped row { ls_batch_item-item_no }: { lx_batch_pending->get_text( ) }|.
  ENDTRY.
  ENDLOOP.
 
@@ -1130,19 +1068,14 @@ CATCH zcx_excel_pipeline INTO DATA(lx_batch_pending).
  iv_table_name = ls_config-tablename
  iv_record_key = CONV #( ls_batch_item-record_key )
  iv_parent_audit_id = lv_parent_audit_id ).
-IF ls_batch_delete-success <> abap_true.
+ IF ls_batch_delete-success <> abap_true.
  lv_batch_success = abap_false.
- lv_batch_message = |{ lv_batch_message }{ NEW zcx_error(
-                       textid     = zcx_error=>item_error
-                       iv_item_no = |{ ls_batch_item-item_no }|
-                       iv_message = ls_batch_delete-message )->get_text( ) } |.
+ lv_batch_message = |{ lv_batch_message } Item { ls_batch_item-item_no }: { ls_batch_delete-message }|.
  ENDIF.
  ENDLOOP.
 
-IF lv_batch_success = abap_true.
- lv_batch_message = NEW zcx_error(
-                       textid   = zcx_error=>deleted_n_records
-                       iv_count = |{ lines( lt_batch_items ) }| )->get_text( ).
+ IF lv_batch_success = abap_true.
+ lv_batch_message = |Deleted { lines( lt_batch_items ) } record(s) successfully|.
  ENDIF.
 
  APPEND VALUE #(
@@ -1301,32 +1234,22 @@ IF lv_batch_success = abap_true.
  IF sy-subrc = 0. CONTINUE. ENDIF.
 
  DATA(lv_field_type) = SWITCH #( ls_field-inttype
-  WHEN 'D' THEN 'DATE'
-  WHEN 'T' THEN 'TIME'
-  WHEN 'X' THEN
-    COND ztde_field_type(
-      WHEN ls_field-domname CS 'UUID'    THEN 'TEXT'
-      WHEN ls_field-domname CS 'SYSUUID' THEN 'TEXT'
-      WHEN ls_field-leng = 16            THEN 'TEXT'
-      WHEN ls_field-leng = 1             THEN 'CHECK'
-      ELSE 'TEXT'
-    )
-  WHEN 'P' THEN 'AMOUNT'    " hoặc 'NUMBER' / 'DECIMAL' tùy enum ztde_field_type của bạn
-  WHEN 'F' THEN 'AMOUNT'
-  WHEN 'I' THEN 'NUMBER'
-  WHEN '8' THEN 'NUMBER'    " INT8 nếu có dùng
-  WHEN 'b' THEN 'NUMBER'    " INT1
-  WHEN 's' THEN 'NUMBER'    " INT2
-  WHEN 'N' THEN
-    COND ztde_field_type(
-      WHEN ls_field-domname IS NOT INITIAL THEN 'DOMAIN'
-      ELSE 'TEXT'
-    )
-  ELSE COND #(
-    WHEN ls_field-domname IS NOT INITIAL THEN 'DOMAIN'
-    ELSE 'TEXT'
-  )
-).
+ WHEN 'D' THEN 'DATE'
+ WHEN 'X' THEN
+ COND ztde_field_type(
+ WHEN ls_field-domname CS 'UUID' THEN 'TEXT'
+ WHEN ls_field-domname CS 'SYSUUID' THEN 'TEXT'
+ WHEN ls_field-leng = 16 THEN 'TEXT'
+ ELSE 'CHECK'
+ )
+ WHEN 'P' THEN 'TEXT'
+ WHEN 'I' THEN 'TEXT'
+ WHEN 'N' THEN 'TEXT'
+ ELSE COND #(
+ WHEN ls_field-domname IS NOT INITIAL THEN 'DOMAIN'
+ ELSE 'TEXT'
+ )
+ ).
 
  DATA(lv_label) = CONV dd04t-reptext( '' ).
  IF ls_field-rollname IS NOT INITIAL.
@@ -1400,9 +1323,7 @@ IF lv_batch_success = abap_true.
  IF lv_domain_name IS INITIAL.
  APPEND VALUE #(
  %tky = ls_config-%tky
- %param = VALUE #(
-   domain_name = lv_domain_name
-   error_msg   = NEW zcx_error( textid = zcx_error=>domain_name_empty )->get_text( ) )
+ %param = VALUE #( domain_name = lv_domain_name error_msg = 'Domain name is empty' )
  ) TO result.
  CONTINUE.
  ENDIF.
@@ -1414,10 +1335,8 @@ IF lv_batch_success = abap_true.
  %tky = ls_config-%tky
  %param = VALUE #(
  domain_name = lv_domain_name
- error_msg = NEW zcx_error(
-               textid        = zcx_error=>no_values_found_for_domain
-              iv_domain_name = CONV #( lv_domain_name ) )->get_text( )
-               )
+ error_msg = |No values found for domain { lv_domain_name }|
+ )
  ) TO result.
  CONTINUE.
  ENDIF.
@@ -1455,14 +1374,10 @@ IF lv_batch_success = abap_true.
       INTO TABLE @DATA(lt_dd03l).
 
     IF lt_dd03l IS INITIAL.
-
       APPEND VALUE #(
         %tky   = ls_config-%tky
-        %param = VALUE #(
-          table_name = ls_config-tablename
-          error_msg  = NEW zcx_error(
-                         textid        = zcx_error=>no_fields_found_for_table
-                         iv_table_name = CONV #( ls_config-tablename ) )->get_text( ) )
+        %param = VALUE #( table_name = ls_config-tablename
+                          error_msg  = |No fields found for table { ls_config-tablename }| )
       ) TO result.
       CONTINUE.
     ENDIF.
@@ -1615,10 +1530,8 @@ ENDMETHOD.
  %tky = ls_config-%tky
  %param = VALUE #(
  table_name = ls_config-tablename
- error_msg = NEW zcx_error(
-               textid        = zcx_error=>table_not_found
-              iv_table_name = CONV #( ls_config-tablename ) )->get_text( )
-               )
+ error_msg = |Table { ls_config-tablename } does not exist|
+ )
  ) TO result.
  CONTINUE.
  ENDIF.
@@ -1741,10 +1654,10 @@ ENDMETHOD.
  table_name = ls_config-tablename
  session_id = lv_session_id
  success = abap_true
-message = NEW zcx_error( textid = zcx_error=>lock_acquired )->get_text( ) locked_by = ls_lock-locked_by
+ message = |Lock acquired|
+ locked_by = ls_lock-locked_by
  expires_at = ls_lock-expires_at )
  ) TO result.
-
 
  CATCH zcx_excel_pipeline INTO DATA(lx_lock).
  APPEND VALUE #(
@@ -1794,10 +1707,10 @@ message = NEW zcx_error( textid = zcx_error=>lock_acquired )->get_text( ) locked
 
  TRY.
  zcl_table_lock=>heartbeat(
- iv_table_name  = ls_config-tablename
+ iv_table_name  = CONV #( ls_config-tablename )
  iv_session_id  = ls_param-session_id
  iv_lock_scope  = lv_scope
- iv_record_key  = ls_param-record_key
+ iv_record_key  = CONV #( ls_param-record_key )
  iv_ttl_seconds = lv_ttl ).
 
  SELECT SINGLE locked_by, expires_at
@@ -1814,7 +1727,8 @@ message = NEW zcx_error( textid = zcx_error=>lock_acquired )->get_text( ) locked
  table_name = ls_config-tablename
  session_id = ls_param-session_id
  success = abap_true
-message = NEW zcx_error( textid = zcx_error=>lock_heartbeat_updated )->get_text( ) locked_by = ls_lock-locked_by
+ message = |Lock heartbeat updated|
+ locked_by = ls_lock-locked_by
  expires_at = ls_lock-expires_at )
  ) TO result.
 
@@ -1865,7 +1779,7 @@ message = NEW zcx_error( textid = zcx_error=>lock_heartbeat_updated )->get_text(
  table_name = ls_config-tablename
  session_id = ls_param-session_id
  success = abap_true
-message = NEW zcx_error( textid = zcx_error=>lock_released )->get_text( ) )
+ message = |Lock released| )
  ) TO result.
 
  CATCH zcx_excel_pipeline INTO DATA(lx_lock).
@@ -1902,7 +1816,7 @@ message = NEW zcx_error( textid = zcx_error=>lock_released )->get_text( ) )
  %param = VALUE #(
  table_name = ls_config-tablename
  success = abap_true
- message = NEW zcx_error( textid = zcx_error=>locks_force_released )->get_text( ) )
+ message = |Locks force released| )
  ) TO result.
 
  CATCH zcx_excel_pipeline INTO DATA(lx_auth).
@@ -1931,7 +1845,7 @@ message = NEW zcx_error( textid = zcx_error=>lock_released )->get_text( ) )
  %tky = ls_config-%tky
  %param = VALUE #(
  table_name = ''
- error_msg = NEW zcx_error( textid = zcx_error=>table_name_empty_on_config )->get_text( )
+ error_msg = 'Table name is empty on this config record'
  )
  ) TO result.
  CONTINUE.
@@ -1963,7 +1877,7 @@ METHOD getfkvalues.
     IF lv_child_table IS INITIAL OR lv_fk_field IS INITIAL.
       APPEND VALUE #(
         %tky   = ls_key-%tky
-        %param = VALUE #( error_msg = NEW zcx_error( textid = zcx_error=>table_field_name_required )->get_text( ) )
+        %param = VALUE #( error_msg = 'table_name and field_name are required' )
       ) TO result.
       CONTINUE.
     ENDIF.
@@ -1987,10 +1901,7 @@ METHOD getfkvalues.
       APPEND VALUE #(
         %tky   = ls_key-%tky
         %param = VALUE #(
-              error_msg = NEW zcx_error(
-              textid        = zcx_error=>field_not_fk_in_table
-              iv_field_name = CONV #( lv_fk_field )
-              iv_table_name = CONV #( lv_child_table ) )->get_text( )
+          error_msg = |Field { lv_fk_field } is not a FK in table { lv_child_table }|
         )
       ) TO result.
       CONTINUE.
@@ -2141,7 +2052,7 @@ METHOD getaidescription.
     IF lv_table IS INITIAL.
       APPEND VALUE #(
         %tky   = ls_key-%tky
-        %param = VALUE #( error_msg = NEW zcx_error( textid = zcx_error=>table_name_required )->get_text( ) )
+        %param = VALUE #( error_msg = 'table_name is required' )
       ) TO result.
       CONTINUE.
     ENDIF.
@@ -2150,12 +2061,7 @@ METHOD getaidescription.
     IF zcl_table_inspector=>table_exists( lv_table ) = abap_false.
       APPEND VALUE #(
         %tky   = ls_key-%tky
-        %param = VALUE #(
-        " table_not_found
-error_msg = NEW zcx_error(
-              textid       = zcx_error=>table_not_found
-              iv_table_name = CONV #( lv_table ) )->get_text( )
-        )
+        %param = VALUE #( error_msg = |Table { lv_table } does not exist| )
       ) TO result.
       CONTINUE.
     ENDIF.
@@ -2167,7 +2073,7 @@ error_msg = NEW zcx_error(
         IF lt_descriptions IS INITIAL.
           APPEND VALUE #(
             %tky   = ls_key-%tky
-            %param = VALUE #( error_msg = NEW zcx_error( textid = zcx_error=>ai_returned_empty_response )->get_text( ) )
+            %param = VALUE #( error_msg = 'AI returned empty response' )
           ) TO result.
           CONTINUE.
         ENDIF.
