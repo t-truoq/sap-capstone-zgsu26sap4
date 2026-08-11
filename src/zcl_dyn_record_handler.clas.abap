@@ -1,3 +1,4 @@
+
 CLASS zcl_dyn_record_handler DEFINITION
 PUBLIC FINAL CREATE PUBLIC.
 PUBLIC SECTION.
@@ -86,7 +87,7 @@ TYPES:
       IMPORTING iv_table_name  TYPE tabname
                 iv_where      TYPE string
       RETURNING VALUE(rr_row)  TYPE REF TO data
-      RAISING   zcx_error
+      RAISING   zcx_excel_pipeline
                 cx_sy_dynamic_osql_error.
 
 CLASS-METHODS serialize
@@ -186,19 +187,6 @@ CLASS-METHODS fill_client
                 iv_timestamp TYPE timestampl
                 iv_force     TYPE abap_bool DEFAULT abap_false.
 
-    " ── NEW: date/time field filler cho các field kiểu DATS/TIMS (ERDAT/ERZET/AEDAT/AEZET...) ──
-    CLASS-METHODS fill_date_field
-      IMPORTING iv_fieldname TYPE fieldname
-                ir_record    TYPE REF TO data
-                iv_date      TYPE dats
-                iv_force     TYPE abap_bool DEFAULT abap_false.
-
-    CLASS-METHODS fill_time_field
-      IMPORTING iv_fieldname TYPE fieldname
-                ir_record    TYPE REF TO data
-                iv_time      TYPE tims
-                iv_force     TYPE abap_bool DEFAULT abap_false.
-
     CLASS-METHODS keep_old_field
       IMPORTING iv_fieldname  TYPE fieldname
                 ir_new_record TYPE REF TO data
@@ -283,18 +271,13 @@ METHOD create_record.
 
           rs_result = VALUE #(
             success    = abap_true
-            message    = NEW zcx_error(
-                            textid        = zcx_error=>record_created_ok
-                            iv_record_key = lv_key_j )->get_text( )
+            message    = 'Record created successfully'
             record_key = CONV #( lv_key_j )
           ).
         ELSE.
           rs_result = VALUE #(
             success = abap_false
-            message = NEW zcx_error(
-                        textid        = zcx_error=>insert_failed_subrc
-                        iv_table_name = CONV string( iv_table_name )
-                        iv_message    = |sy-subrc = { sy-subrc }| )->get_text( )
+            message = |Insert failed with sy-subrc = { sy-subrc }|
           ).
         ENDIF.
 
@@ -348,11 +331,7 @@ METHOD create_record.
         IF sy-subrc <> 0.
           rs_result = VALUE #(
             success = abap_false
-            message = NEW zcx_error(
-                        textid        = zcx_error=>record_no_longer_exists
-                        iv_record_key = zcl_dyn_record_handler=>build_key_json(
-                                           it_key_fields = lt_keys
-                                           ir_record     = lo_new ) )->get_text( )
+            message = 'Record not found — may have been deleted'
           ).
           RETURN.
         ENDIF.
@@ -365,11 +344,7 @@ METHOD create_record.
             IF condense( |{ <lv_etag_db> }| ) <> condense( iv_etag_value ).
               rs_result = VALUE #(
                 success = abap_false
-                message = NEW zcx_error(
-                            textid        = zcx_error=>record_changed_after_preview
-                            iv_record_key = zcl_dyn_record_handler=>build_key_json(
-                                               it_key_fields = lt_keys
-                                               ir_record     = lo_new ) )->get_text( )
+                message = 'Optimistic lock failed: record was modified by another user'
               ).
               RETURN.
             ENDIF.
@@ -401,16 +376,12 @@ METHOD create_record.
         rs_result = COND #(
           WHEN sy-subrc = 0 THEN VALUE #(
             success    = abap_true
-            message    = NEW zcx_error(
-                            textid        = zcx_error=>record_updated_ok
-                            iv_record_key = lv_key_json )->get_text( )
+            message    = 'Record updated successfully'
             record_key = CONV #( lv_key_json )
           )
           ELSE VALUE #(
             success = abap_false
-            message = NEW zcx_error(
-                        textid        = zcx_error=>record_no_longer_exists
-                        iv_record_key = lv_key_json )->get_text( )
+            message = 'Update failed — record may not exist'
           )
         ).
 
@@ -479,17 +450,13 @@ METHOD create_record.
           ).
           rs_result = VALUE #(
             success    = abap_true
-            message    = NEW zcx_error(
-                            textid        = zcx_error=>record_deleted_ok
-                            iv_record_key = CONV string( iv_record_key ) )->get_text( )
+            message    = 'Record deleted successfully'
             record_key = iv_record_key
           ).
         ELSE.
           rs_result = VALUE #(
             success = abap_false
-            message = NEW zcx_error(
-                        textid        = zcx_error=>record_no_longer_exists
-                        iv_record_key = CONV string( iv_record_key ) )->get_text( )
+            message = 'Delete failed — record may not exist'
           ).
         ENDIF.
 
@@ -525,12 +492,14 @@ ENDMETHOD.
       SELECT *
         FROM (iv_table_name)
         INTO TABLE @<lt_table>
+        BYPASSING BUFFER
         UP TO @iv_max_rows ROWS.
     ELSE.
       SELECT *
         FROM (iv_table_name)
         WHERE (iv_where_clause)
         INTO TABLE @<lt_table>
+        BYPASSING BUFFER
         UP TO @iv_max_rows ROWS.
     ENDIF.
   ENDMETHOD.
@@ -705,9 +674,7 @@ ENDMETHOD.
             ENDLOOP.
 
             IF lv_all_match = abap_true.
-              rv_error = NEW zcx_error(
-                textid        = zcx_error=>record_still_referenced
-                iv_table_name = CONV string( ls_fk-tabname ) )->get_text( ).
+              rv_error = |Cannot delete: record is referenced by table { ls_fk-tabname }|.
               RETURN.
             ENDIF.
           ENDLOOP.
@@ -804,9 +771,7 @@ ENDMETHOD.
                 TRANSLATE lv_candidate_text TO UPPER CASE.
 
                 IF lv_candidate_text = lv_parent_key_text.
-                  rv_error = NEW zcx_error(
-                    textid        = zcx_error=>record_still_referenced
-                    iv_table_name = CONV string( lv_candidate_table ) )->get_text( ).
+                  rv_error = |Cannot delete: record is referenced by table { lv_candidate_table }|.
                   RETURN.
                 ENDIF.
 
@@ -822,7 +787,6 @@ ENDMETHOD.
       UNASSIGN <lv_parent_key_value>.
     ENDLOOP.
   ENDMETHOD.
-
 METHOD serialize.
     TRY.
         DATA(lo_desc) = cl_abap_typedescr=>describe_by_data( ia_data ).
@@ -893,7 +857,8 @@ METHOD serialize.
     ENDTRY.
   ENDMETHOD.
 
- METHOD serialize_struct.
+
+METHOD serialize_struct.
     " Bước 1: Serialize bình thường — /ui2/cl_json có thể encode RAW thành Base64
     TRY.
         rv_json = /ui2/cl_json=>serialize(
@@ -961,8 +926,7 @@ METHOD serialize.
         " Nếu fail post-process -> vẫn trả JSON gốc, không crash
     ENDTRY.
 ENDMETHOD.
-
-METHOD deserialize.
+  METHOD deserialize.
     ASSIGN ca_record->* TO FIELD-SYMBOL(<ls_record>).
 
     TRY.
@@ -970,21 +934,21 @@ METHOD deserialize.
           cl_abap_typedescr=>describe_by_data( <ls_record> )
         ).
       CATCH cx_sy_move_cast_error.
+        " Không phải structure → deserialize thẳng, không xử lý RAW
         TRY.
             /ui2/cl_json=>deserialize( EXPORTING json = iv_json CHANGING data = <ls_record> ).
           CATCH cx_root INTO DATA(lx_plain).
-            DATA(lv_debug_json1) = COND string(                              "<<< SỬA
-              WHEN strlen( iv_json ) > 2000 THEN iv_json(2000)               "<<< SỬA
-              ELSE iv_json ).                                                "<<< SỬA
             RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-              EXPORTING value = |{ lx_plain->get_text( ) } (raw JSON: { lv_debug_json1 })|.   "<<< SỬA
+              EXPORTING value = lx_plain->get_text( ).
         ENDTRY.
         RETURN.
     ENDTRY.
 
-    DATA(lv_json_safe) = iv_json.
-
     " ── Bước 1: Strip RAW fields khỏi JSON để /ui2/cl_json không crash ──
+    " Đồng thời lưu lại hex values từ JSON gốc để assign sau
+    DATA(lv_json_safe) = iv_json.
+    DATA lt_raw_map TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line. " dùng fieldname làm key
+    " Dùng string table thay vì hashed để map fieldname → hex value
     TYPES: BEGIN OF ty_raw_entry,
              fieldname TYPE string,
              hex_value TYPE string,
@@ -999,60 +963,18 @@ METHOD deserialize.
         iv_field_name = ls_comp-name
       ).
 
+      " Lưu lại để assign sau dù có value hay không
       APPEND VALUE #(
         fieldname = ls_comp-name
         hex_value = lv_hex_val
       ) TO lt_raw_entries.
 
+      " Strip khỏi JSON safe nếu có value (tránh /ui2/cl_json crash)
       IF lv_hex_val IS NOT INITIAL.
         REPLACE ALL OCCURRENCES OF |"{ ls_comp-name }":"{ lv_hex_val }"|
           IN lv_json_safe
           WITH |"{ ls_comp-name }":""|.
       ENDIF.
-    ENDLOOP.
-
-    " ── Bước 1b: Strip audit fields (CREATED_BY/CREATED_AT/ERDAT/... ) khỏi JSON ──
-    DATA lt_audit_fields TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
-    lt_audit_fields = VALUE #(
-      ( `CREATED_BY` ) ( `CREATEDBY` ) ( `CREATED_BY_USER` ) ( `CREATED_USER` )
-      ( `CREATOR` ) ( `CRE_USER` ) ( `CRUSER` ) ( `ERNAM` ) ( `USNAM` )
-      ( `CHANGED_BY` ) ( `CHANGEDBY` ) ( `CHANGED_BY_USER` ) ( `LAST_CHANGED_BY` )
-      ( `MODIFIED_BY` ) ( `UPDATED_BY` ) ( `CHG_USER` ) ( `CHUSER` ) ( `AENAM` )
-      ( `CREATED_AT` ) ( `CREATEDAT` ) ( `CREATED_ON` ) ( `CREATE_TIMESTAMP` )
-      ( `CREATED_TIMESTAMP` ) ( `LOCAL_CREATED_AT` )
-      ( `CHANGED_AT` ) ( `CHANGEDAT` ) ( `CHANGED_ON` ) ( `LAST_CHANGED_AT` )
-      ( `UPDATED_AT` ) ( `MODIFIED_AT` ) ( `CHANGE_TIMESTAMP` ) ( `LOCAL_LAST_CHANGED_AT` )
-      ( `ERDAT` ) ( `ERZET` ) ( `AEDAT` ) ( `AEZET` )
-      ( `CRDAT` ) ( `CRTIM` ) ( `CDAT` ) ( `CTIM` )
-    ).
-
-    LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_audit_comp).
-      READ TABLE lt_audit_fields TRANSPORTING NO FIELDS
-        WITH KEY table_line = ls_audit_comp-name.
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
-
-      DATA(lv_audit_val) = extract_json_value(
-        iv_json       = lv_json_safe
-        iv_field_name = ls_audit_comp-name
-      ).
-
-      IF lv_audit_val IS NOT INITIAL.
-        REPLACE ALL OCCURRENCES OF |"{ ls_audit_comp-name }":"{ lv_audit_val }"|
-          IN lv_json_safe
-          WITH |"{ ls_audit_comp-name }":null|.
-      ENDIF.
-    ENDLOOP.
-
-    " ── Bước 1c: Strip empty string "" cho các field DATS/TIMS còn lại (không phải audit) ──
-    LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_date_comp)
-      WHERE type->type_kind = cl_abap_typedescr=>typekind_date
-         OR type->type_kind = cl_abap_typedescr=>typekind_time.
-
-      REPLACE ALL OCCURRENCES OF |"{ ls_date_comp-name }":""|
-        IN lv_json_safe
-        WITH |"{ ls_date_comp-name }":null|.
     ENDLOOP.
 
     " ── Bước 2: Deserialize phần CHAR/DATE/NUM bình thường ──
@@ -1062,17 +984,16 @@ METHOD deserialize.
           CHANGING  data = <ls_record>
         ).
       CATCH cx_root INTO DATA(lx_deser).
-        DATA(lv_debug_json2) = COND string(                                  "<<< SỬA
-          WHEN strlen( lv_json_safe ) > 2000 THEN lv_json_safe(2000)         "<<< SỬA
-          ELSE lv_json_safe ).                                               "<<< SỬA
         RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-          EXPORTING value = |{ lx_deser->get_text( ) } (raw JSON: { lv_debug_json2 })|.   "<<< SỬA
+          EXPORTING value = lx_deser->get_text( ).
     ENDTRY.
 
     " ── Bước 3: Assign RAW fields từ hex string đã lưu ──
+    " FE cam kết gửi đúng hex string UPPERCASE — BE convert thẳng, không detect
     LOOP AT lt_raw_entries INTO DATA(ls_raw_entry).
       IF ls_raw_entry-hex_value IS INITIAL. CONTINUE. ENDIF.
 
+      " Validate độ dài: hex string phải = field length * 2
       DATA(lo_comp_type) = CAST cl_abap_elemdescr(
         lo_sdesc->get_component_type( ls_raw_entry-fieldname )
       ).
@@ -1082,10 +1003,12 @@ METHOD deserialize.
       CONDENSE lv_hex_clean NO-GAPS.
       TRANSLATE lv_hex_clean TO UPPER CASE.
 
+      " Fail fast: sai độ dài → bỏ qua field này (contract violation từ FE)
       IF strlen( lv_hex_clean ) <> lv_expected_len.
         CONTINUE.
       ENDIF.
 
+      " Assign hex → RAW
       assign_hex_to_raw(
         EXPORTING iv_hex       = lv_hex_clean
                   iv_fieldname = ls_raw_entry-fieldname
@@ -1093,13 +1016,14 @@ METHOD deserialize.
       ).
     ENDLOOP.
   ENDMETHOD.
+
   METHOD deserialize_batch.
     DATA(lo_desc)       = get_struct_desc( iv_table_name ).
     DATA(lt_json_items) = split_json_array( iv_json_array ).
 
     IF lt_json_items IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING textid = zcx_error=>json_array_invalid.
+      RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
+        EXPORTING value = 'JSON array is empty or invalid'.
     ENDIF.
 
     LOOP AT lt_json_items INTO DATA(lv_item_json).
@@ -1258,9 +1182,8 @@ ENDMETHOD.
     FIELD-SYMBOLS <table> TYPE STANDARD TABLE.
     ASSIGN lr_table->* TO <table>.
     IF <table> IS NOT ASSIGNED OR <table> IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING textid          = zcx_error=>no_record_found
-                  iv_where_clause = iv_where.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |No record found for WHERE: { iv_where }|.
     ENDIF.
 
     READ TABLE <table> INDEX 1 ASSIGNING FIELD-SYMBOL(<row>).
@@ -1276,9 +1199,6 @@ ENDMETHOD.
     keep_old_field( iv_fieldname = 'CREATEDBY'   ir_new_record = ir_new_record ir_old_record = ir_old_record ).
     keep_old_field( iv_fieldname = 'CREATED_AT'  ir_new_record = ir_new_record ir_old_record = ir_old_record ).
     keep_old_field( iv_fieldname = 'CREATEDAT'   ir_new_record = ir_new_record ir_old_record = ir_old_record ).
-    keep_old_field( iv_fieldname = 'ERNAM'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
-    keep_old_field( iv_fieldname = 'ERDAT'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
-    keep_old_field( iv_fieldname = 'ERZET'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
 
     ASSIGN ir_new_record->* TO FIELD-SYMBOL(<record>).
     IF <record> IS ASSIGNED.
@@ -1289,105 +1209,37 @@ ENDMETHOD.
   METHOD apply_admin_on_insert.
     DATA lr_record TYPE REF TO data.
     GET REFERENCE OF cs_record INTO lr_record.
-    DATA lv_ts   TYPE timestampl.
-    DATA lv_date TYPE dats.
-    DATA lv_time TYPE tims.
+    DATA lv_ts TYPE timestampl.
     GET TIME STAMP FIELD lv_ts.
 
-    CONVERT TIME STAMP lv_ts TIME ZONE sy-zonlo
-      INTO DATE lv_date TIME lv_time.
-
-    " ===== CREATED BY (user) - các biến thể tên field =====
     fill_user_field( iv_fieldname = 'CREATED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CREATEDBY'       ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CREATED_BY_USER' ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CREATED_USER'    ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CREATOR'         ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CRE_USER'        ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CRUSER'          ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'ERNAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
-    fill_user_field( iv_fieldname = 'USNAM'           ir_record = lr_record iv_force = abap_true ). " một số bảng dùng USNAM cho created
-
-    " ===== CHANGED BY (user) khi mới tạo -> giống created =====
     fill_user_field( iv_fieldname = 'CHANGED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CHANGEDBY'       ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CHANGED_BY_USER' ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'LAST_CHANGED_BY' ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'MODIFIED_BY'     ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'UPDATED_BY'      ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CHG_USER'        ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CHUSER'          ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'AENAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
 
-    " ===== CREATED AT (timestamp kiểu TIMESTAMP/TIMESTAMPL) =====
     fill_timestamp_field( iv_fieldname = 'CREATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CREATEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'CREATED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'CREATE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'CREATED_TIMESTAMP'     ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'LOCAL_CREATED_AT'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-
     fill_timestamp_field( iv_fieldname = 'CHANGED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CHANGEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'CHANGED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LAST_CHANGED_AT'       ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'UPDATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'MODIFIED_AT'           ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'CHANGE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LOCAL_LAST_CHANGED_AT' ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-
-    " ===== ERDAT/ERZET & AEDAT/AEZET (classic SAP - DATS/TIMS riêng biệt) =====
-    fill_date_field( iv_fieldname = 'ERDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
-    fill_time_field( iv_fieldname = 'ERZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
-    fill_date_field( iv_fieldname = 'AEDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
-    fill_time_field( iv_fieldname = 'AEZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
-
-    " ===== các biến thể DATS/TIMS khác hay gặp =====
-    fill_date_field( iv_fieldname = 'CRDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
-    fill_time_field( iv_fieldname = 'CRTIM' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
-    fill_date_field( iv_fieldname = 'CDAT'  ir_record = lr_record iv_date = lv_date iv_force = abap_true ). " change date
-    fill_time_field( iv_fieldname = 'CTIM'  ir_record = lr_record iv_time = lv_time iv_force = abap_true ). " change time
   ENDMETHOD.
 
   METHOD apply_admin_on_update.
     DATA lr_record TYPE REF TO data.
     GET REFERENCE OF cs_record INTO lr_record.
-    DATA lv_ts   TYPE timestampl.
-    DATA lv_date TYPE dats.
-    DATA lv_time TYPE tims.
+    DATA lv_ts TYPE timestampl.
     GET TIME STAMP FIELD lv_ts.
 
-    CONVERT TIME STAMP lv_ts TIME ZONE sy-zonlo
-      INTO DATE lv_date TIME lv_time.
-
-    " ===== CHANGED BY (user) =====
     fill_user_field( iv_fieldname = 'CHANGED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CHANGEDBY'       ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CHANGED_BY_USER' ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'LAST_CHANGED_BY' ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'MODIFIED_BY'     ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'UPDATED_BY'      ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CHG_USER'        ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'CHUSER'          ir_record = lr_record iv_force = abap_true ).
-    fill_user_field( iv_fieldname = 'AENAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
 
-    " ===== CHANGED AT (timestamp) =====
     fill_timestamp_field( iv_fieldname = 'CHANGED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CHANGEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'CHANGED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LAST_CHANGED_AT'       ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'UPDATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'MODIFIED_AT'           ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-    fill_timestamp_field( iv_fieldname = 'CHANGE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LOCAL_LAST_CHANGED_AT' ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
-
-    " ===== AEDAT/AEZET (classic SAP) =====
-    fill_date_field( iv_fieldname = 'AEDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
-    fill_time_field( iv_fieldname = 'AEZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
-
-    " ===== biến thể khác =====
-    fill_date_field( iv_fieldname = 'CDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
-    fill_time_field( iv_fieldname = 'CTIM' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
   ENDMETHOD.
 
   METHOD fill_client.
@@ -1490,7 +1342,7 @@ ENDMETHOD.
     IF sy-subrc <> 0. rv_is_fk = abap_false. ENDIF.
   ENDMETHOD.
 
- METHOD  fill_user_field.
+  METHOD fill_user_field.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
     IF sy-subrc <> 0. RETURN. ENDIF.
 
@@ -1500,7 +1352,7 @@ ENDMETHOD.
     ENDIF.
   ENDMETHOD.
 
-  METHOD fill_timestamp_field.
+METHOD fill_timestamp_field.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
     IF sy-subrc <> 0. RETURN. ENDIF.
 
@@ -1521,36 +1373,7 @@ ENDMETHOD.
         ENDTRY.
     ENDTRY.
 ENDMETHOD.
-  METHOD fill_date_field.
-    ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
-    IF sy-subrc <> 0. RETURN. ENDIF.
 
-    ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record> TO FIELD-SYMBOL(<lv_field>).
-    IF sy-subrc <> 0. RETURN. ENDIF.
-
-    IF iv_force = abap_false AND <lv_field> IS NOT INITIAL. RETURN. ENDIF.
-
-    TRY.
-        <lv_field> = iv_date.
-      CATCH cx_root.
-        " sai type (không phải DATS) -> bỏ qua, không set
-    ENDTRY.
-  ENDMETHOD.
-
-  METHOD fill_time_field.
-    ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
-    IF sy-subrc <> 0. RETURN. ENDIF.
-
-    ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record> TO FIELD-SYMBOL(<lv_field>).
-    IF sy-subrc <> 0. RETURN. ENDIF.
-
-    IF iv_force = abap_false AND <lv_field> IS NOT INITIAL. RETURN. ENDIF.
-
-    TRY.
-        <lv_field> = iv_time.
-      CATCH cx_root.
-    ENDTRY.
-  ENDMETHOD.
 
   METHOD keep_old_field.
     ASSIGN ir_new_record->* TO FIELD-SYMBOL(<ls_new>).
@@ -1707,11 +1530,7 @@ METHOD build_where_clause.
               APPEND VALUE #(
                 fieldname = lv_fieldname
                 value     = lv_value
-                message   = NEW zcx_error(
-                              textid         = zcx_error=>field_invalid_domain
-                              iv_field_name  = CONV string( lv_fieldname )
-                              iv_message     = lv_value
-                              iv_domain_name = CONV string( lv_config_domain ) )->get_text( ) )
+                message   = |Field { lv_fieldname } value '{ lv_value }' is not allowed by domain { lv_config_domain }.| )
                 TO rt_errors.
             ENDIF.
             CONTINUE.
@@ -1744,10 +1563,7 @@ METHOD build_where_clause.
               APPEND VALUE #(
                 fieldname = lv_fieldname
                 value     = lv_value
-                message   = NEW zcx_error(
-                              textid        = zcx_error=>field_fk_invalid
-                              iv_field_name = CONV string( lv_check_msg_field )
-                              iv_message    = lv_value )->get_text( ) )
+                message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
                 TO rt_errors.
               CONTINUE.
             ENDIF.
@@ -1756,10 +1572,7 @@ METHOD build_where_clause.
             APPEND VALUE #(
               fieldname = lv_fieldname
               value     = lv_value
-              message   = NEW zcx_error(
-                            textid        = zcx_error=>field_fk_invalid
-                            iv_field_name = CONV string( lv_check_msg_field )
-                            iv_message    = lv_value )->get_text( ) )
+              message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
               TO rt_errors.
             CONTINUE.
           ENDIF.
@@ -1768,10 +1581,7 @@ METHOD build_where_clause.
             APPEND VALUE #(
               fieldname = lv_fieldname
               value     = lv_value
-              message   = NEW zcx_error(
-                            textid        = zcx_error=>field_fk_invalid
-                            iv_field_name = CONV string( lv_check_msg_field )
-                            iv_message    = lv_value )->get_text( ) )
+              message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
               TO rt_errors.
             CONTINUE.
           ENDIF.
@@ -1820,10 +1630,7 @@ METHOD build_where_clause.
           APPEND VALUE #(
             fieldname = lv_fieldname
             value     = lv_value
-            message   = NEW zcx_error(
-                          textid        = zcx_error=>field_fk_invalid
-                          iv_field_name = CONV string( lv_check_msg_field )
-                          iv_message    = lv_value )->get_text( ) )
+            message   = |{ lv_check_msg_field } '{ lv_value }' is invalid. Please select an existing { lv_check_msg_field }.| )
             TO rt_errors.
         ENDIF.
       ELSEIF ls_check-has_fixed = abap_true
@@ -1834,10 +1641,7 @@ METHOD build_where_clause.
         APPEND VALUE #(
           fieldname = lv_fieldname
           value     = lv_value
-          message   = NEW zcx_error(
-                        textid        = zcx_error=>field_invalid_domain
-                        iv_field_name = CONV string( lv_fieldname )
-                        iv_message    = |'{ lv_value }' is not a valid fixed value| )->get_text( ) )
+          message   = |{ lv_fieldname } = '{ lv_value }' is not a valid fixed value| )
           TO rt_errors.
       ENDIF.
     ENDLOOP.
@@ -1880,10 +1684,7 @@ METHOD build_where_clause.
         APPEND VALUE #(
           fieldname = ls_date_pair-to_field
           value     = |{ <date_to> }|
-          message   = NEW zcx_error(
-                        textid         = zcx_error=>date_range_invalid
-                        iv_field_name  = CONV string( ls_date_pair-to_field )
-                        iv_field_name2 = CONV string( ls_date_pair-from_field ) )->get_text( ) )
+          message   = |{ ls_date_pair-to_field } must be on or after { ls_date_pair-from_field }.| )
           TO rt_errors.
       ENDIF.
     ENDLOOP.
@@ -2052,4 +1853,3 @@ METHOD build_where_clause.
   ENDMETHOD.
 
 ENDCLASS.
-
