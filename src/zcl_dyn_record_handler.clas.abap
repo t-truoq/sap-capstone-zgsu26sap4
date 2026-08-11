@@ -1,4 +1,3 @@
-
 CLASS zcl_dyn_record_handler DEFINITION
 PUBLIC FINAL CREATE PUBLIC.
 PUBLIC SECTION.
@@ -185,6 +184,19 @@ CLASS-METHODS fill_client
       IMPORTING iv_fieldname TYPE fieldname
                 ir_record    TYPE REF TO data
                 iv_timestamp TYPE timestampl
+                iv_force     TYPE abap_bool DEFAULT abap_false.
+
+    " ── NEW: date/time field filler cho các field kiểu DATS/TIMS (ERDAT/ERZET/AEDAT/AEZET...) ──
+    CLASS-METHODS fill_date_field
+      IMPORTING iv_fieldname TYPE fieldname
+                ir_record    TYPE REF TO data
+                iv_date      TYPE dats
+                iv_force     TYPE abap_bool DEFAULT abap_false.
+
+    CLASS-METHODS fill_time_field
+      IMPORTING iv_fieldname TYPE fieldname
+                ir_record    TYPE REF TO data
+                iv_time      TYPE tims
                 iv_force     TYPE abap_bool DEFAULT abap_false.
 
     CLASS-METHODS keep_old_field
@@ -492,14 +504,12 @@ ENDMETHOD.
       SELECT *
         FROM (iv_table_name)
         INTO TABLE @<lt_table>
-        BYPASSING BUFFER
         UP TO @iv_max_rows ROWS.
     ELSE.
       SELECT *
         FROM (iv_table_name)
         WHERE (iv_where_clause)
         INTO TABLE @<lt_table>
-        BYPASSING BUFFER
         UP TO @iv_max_rows ROWS.
     ENDIF.
   ENDMETHOD.
@@ -787,6 +797,7 @@ ENDMETHOD.
       UNASSIGN <lv_parent_key_value>.
     ENDLOOP.
   ENDMETHOD.
+
 METHOD serialize.
     TRY.
         DATA(lo_desc) = cl_abap_typedescr=>describe_by_data( ia_data ).
@@ -856,7 +867,8 @@ METHOD serialize.
         rv_json = '{}'.
     ENDTRY.
   ENDMETHOD.
-  METHOD serialize_struct.
+
+ METHOD serialize_struct.
     " Bước 1: Serialize bình thường — /ui2/cl_json có thể encode RAW thành Base64
     TRY.
         rv_json = /ui2/cl_json=>serialize(
@@ -867,13 +879,14 @@ METHOD serialize.
         rv_json = '{}'. RETURN.
     ENDTRY.
 
-    " Bước 2: Post-process — replace giá trị Base64 của RAW fields bằng hex string
-    " SM30 approach: đọc descriptor để biết chính xác field nào là RAW
+    " Bước 2: Post-process — replace giá trị Base64 của RAW fields bằng hex string,
+    " và replace literal UTCLONG không quote bằng chuỗi có quote hợp lệ.
     TRY.
         DATA(lo_sdesc) = CAST cl_abap_structdescr(
           cl_abap_typedescr=>describe_by_data( ia_struct )
         ).
 
+        " ── RAW fields: Base64 -> hex string (SM30 approach) ──
         LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_comp)
           WHERE type->type_kind = cl_abap_typedescr=>typekind_hex.
 
@@ -881,27 +894,50 @@ METHOD serialize.
             TO FIELD-SYMBOL(<lv_raw>).
           IF sy-subrc <> 0 OR <lv_raw> IS INITIAL. CONTINUE. ENDIF.
 
-          " Lấy hex string chuẩn từ ABAP
           DATA(lv_hex_str) = |{ <lv_raw> }|.
           CONDENSE lv_hex_str NO-GAPS.
           TRANSLATE lv_hex_str TO UPPER CASE.
 
-          " Replace bất kỳ giá trị nào /ui2/cl_json đã ghi cho field này
-          " Pattern: "FIELDNAME":"<any_value>"
           DATA(lv_pattern) = |"{ ls_comp-name }":"([^"]*)"|.
           DATA(lv_replace) = |"{ ls_comp-name }":"{ lv_hex_str }"|.
           REPLACE FIRST OCCURRENCE OF REGEX lv_pattern
             IN rv_json
             WITH lv_replace.
+        ENDLOOP.
 
+        " ── UTCLONG fields: /ui2/cl_json xuất literal thô KHÔNG quote -> JSON invalid.
+        "    Bọc lại trong quote cho hợp lệ JSON + tương thích với logic
+        "    strip audit field / deserialize ở phía đọc. ──
+        LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_utc_comp)
+          WHERE type->type_kind = cl_abap_typedescr=>typekind_utclong.
+
+          ASSIGN COMPONENT ls_utc_comp-name OF STRUCTURE ia_struct
+            TO FIELD-SYMBOL(<lv_utc>).
+          IF sy-subrc <> 0. CONTINUE. ENDIF.
+
+          " Dùng literal string (backquote) + && để tránh lỗi escape backslash
+          " trong string template |...| (\s không hợp lệ trong |...|).
+          DATA(lv_utc_pattern) =
+            `"` && ls_utc_comp-name && `":\s*[0-9]{4}-[0-9]{2}-[0-9]{2}[^,}]*`.
+
+          IF <lv_utc> IS INITIAL.
+            DATA(lv_utc_replace) = |"{ ls_utc_comp-name }":null|.
+          ELSE.
+            DATA(lv_iso) = |{ <lv_utc> }|.
+            lv_utc_replace = |"{ ls_utc_comp-name }":"{ lv_iso }"|.
+          ENDIF.
+
+          REPLACE FIRST OCCURRENCE OF REGEX lv_utc_pattern
+            IN rv_json
+            WITH lv_utc_replace.
         ENDLOOP.
 
       CATCH cx_root.
-        " Nếu fail post-process → vẫn trả JSON gốc, không crash
+        " Nếu fail post-process -> vẫn trả JSON gốc, không crash
     ENDTRY.
-  ENDMETHOD.
+ENDMETHOD.
 
-  METHOD deserialize.
+METHOD deserialize.
     ASSIGN ca_record->* TO FIELD-SYMBOL(<ls_record>).
 
     TRY.
@@ -909,21 +945,21 @@ METHOD serialize.
           cl_abap_typedescr=>describe_by_data( <ls_record> )
         ).
       CATCH cx_sy_move_cast_error.
-        " Không phải structure → deserialize thẳng, không xử lý RAW
         TRY.
             /ui2/cl_json=>deserialize( EXPORTING json = iv_json CHANGING data = <ls_record> ).
           CATCH cx_root INTO DATA(lx_plain).
+            DATA(lv_debug_json1) = COND string(                              "<<< SỬA
+              WHEN strlen( iv_json ) > 2000 THEN iv_json(2000)               "<<< SỬA
+              ELSE iv_json ).                                                "<<< SỬA
             RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-              EXPORTING value = lx_plain->get_text( ).
+              EXPORTING value = |{ lx_plain->get_text( ) } (raw JSON: { lv_debug_json1 })|.   "<<< SỬA
         ENDTRY.
         RETURN.
     ENDTRY.
 
-    " ── Bước 1: Strip RAW fields khỏi JSON để /ui2/cl_json không crash ──
-    " Đồng thời lưu lại hex values từ JSON gốc để assign sau
     DATA(lv_json_safe) = iv_json.
-    DATA lt_raw_map TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line. " dùng fieldname làm key
-    " Dùng string table thay vì hashed để map fieldname → hex value
+
+    " ── Bước 1: Strip RAW fields khỏi JSON để /ui2/cl_json không crash ──
     TYPES: BEGIN OF ty_raw_entry,
              fieldname TYPE string,
              hex_value TYPE string,
@@ -938,18 +974,60 @@ METHOD serialize.
         iv_field_name = ls_comp-name
       ).
 
-      " Lưu lại để assign sau dù có value hay không
       APPEND VALUE #(
         fieldname = ls_comp-name
         hex_value = lv_hex_val
       ) TO lt_raw_entries.
 
-      " Strip khỏi JSON safe nếu có value (tránh /ui2/cl_json crash)
       IF lv_hex_val IS NOT INITIAL.
         REPLACE ALL OCCURRENCES OF |"{ ls_comp-name }":"{ lv_hex_val }"|
           IN lv_json_safe
           WITH |"{ ls_comp-name }":""|.
       ENDIF.
+    ENDLOOP.
+
+    " ── Bước 1b: Strip audit fields (CREATED_BY/CREATED_AT/ERDAT/... ) khỏi JSON ──
+    DATA lt_audit_fields TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    lt_audit_fields = VALUE #(
+      ( `CREATED_BY` ) ( `CREATEDBY` ) ( `CREATED_BY_USER` ) ( `CREATED_USER` )
+      ( `CREATOR` ) ( `CRE_USER` ) ( `CRUSER` ) ( `ERNAM` ) ( `USNAM` )
+      ( `CHANGED_BY` ) ( `CHANGEDBY` ) ( `CHANGED_BY_USER` ) ( `LAST_CHANGED_BY` )
+      ( `MODIFIED_BY` ) ( `UPDATED_BY` ) ( `CHG_USER` ) ( `CHUSER` ) ( `AENAM` )
+      ( `CREATED_AT` ) ( `CREATEDAT` ) ( `CREATED_ON` ) ( `CREATE_TIMESTAMP` )
+      ( `CREATED_TIMESTAMP` ) ( `LOCAL_CREATED_AT` )
+      ( `CHANGED_AT` ) ( `CHANGEDAT` ) ( `CHANGED_ON` ) ( `LAST_CHANGED_AT` )
+      ( `UPDATED_AT` ) ( `MODIFIED_AT` ) ( `CHANGE_TIMESTAMP` ) ( `LOCAL_LAST_CHANGED_AT` )
+      ( `ERDAT` ) ( `ERZET` ) ( `AEDAT` ) ( `AEZET` )
+      ( `CRDAT` ) ( `CRTIM` ) ( `CDAT` ) ( `CTIM` )
+    ).
+
+    LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_audit_comp).
+      READ TABLE lt_audit_fields TRANSPORTING NO FIELDS
+        WITH KEY table_line = ls_audit_comp-name.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_audit_val) = extract_json_value(
+        iv_json       = lv_json_safe
+        iv_field_name = ls_audit_comp-name
+      ).
+
+      IF lv_audit_val IS NOT INITIAL.
+        REPLACE ALL OCCURRENCES OF |"{ ls_audit_comp-name }":"{ lv_audit_val }"|
+          IN lv_json_safe
+          WITH |"{ ls_audit_comp-name }":null|.
+      ENDIF.
+    ENDLOOP.
+
+    " ── Bước 1c: Strip empty string "" cho các field DATS/TIMS còn lại (không phải audit) ──
+    LOOP AT lo_sdesc->get_components( ) INTO DATA(ls_date_comp)
+      WHERE type->type_kind = cl_abap_typedescr=>typekind_date
+         OR type->type_kind = cl_abap_typedescr=>typekind_time.
+
+      REPLACE ALL OCCURRENCES OF |"{ ls_date_comp-name }":""|
+        IN lv_json_safe
+        WITH |"{ ls_date_comp-name }":null|.
     ENDLOOP.
 
     " ── Bước 2: Deserialize phần CHAR/DATE/NUM bình thường ──
@@ -959,16 +1037,17 @@ METHOD serialize.
           CHANGING  data = <ls_record>
         ).
       CATCH cx_root INTO DATA(lx_deser).
+        DATA(lv_debug_json2) = COND string(                                  "<<< SỬA
+          WHEN strlen( lv_json_safe ) > 2000 THEN lv_json_safe(2000)         "<<< SỬA
+          ELSE lv_json_safe ).                                               "<<< SỬA
         RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-          EXPORTING value = lx_deser->get_text( ).
+          EXPORTING value = |{ lx_deser->get_text( ) } (raw JSON: { lv_debug_json2 })|.   "<<< SỬA
     ENDTRY.
 
     " ── Bước 3: Assign RAW fields từ hex string đã lưu ──
-    " FE cam kết gửi đúng hex string UPPERCASE — BE convert thẳng, không detect
     LOOP AT lt_raw_entries INTO DATA(ls_raw_entry).
       IF ls_raw_entry-hex_value IS INITIAL. CONTINUE. ENDIF.
 
-      " Validate độ dài: hex string phải = field length * 2
       DATA(lo_comp_type) = CAST cl_abap_elemdescr(
         lo_sdesc->get_component_type( ls_raw_entry-fieldname )
       ).
@@ -978,12 +1057,10 @@ METHOD serialize.
       CONDENSE lv_hex_clean NO-GAPS.
       TRANSLATE lv_hex_clean TO UPPER CASE.
 
-      " Fail fast: sai độ dài → bỏ qua field này (contract violation từ FE)
       IF strlen( lv_hex_clean ) <> lv_expected_len.
         CONTINUE.
       ENDIF.
 
-      " Assign hex → RAW
       assign_hex_to_raw(
         EXPORTING iv_hex       = lv_hex_clean
                   iv_fieldname = ls_raw_entry-fieldname
@@ -991,7 +1068,6 @@ METHOD serialize.
       ).
     ENDLOOP.
   ENDMETHOD.
-
   METHOD deserialize_batch.
     DATA(lo_desc)       = get_struct_desc( iv_table_name ).
     DATA(lt_json_items) = split_json_array( iv_json_array ).
@@ -1174,6 +1250,9 @@ ENDMETHOD.
     keep_old_field( iv_fieldname = 'CREATEDBY'   ir_new_record = ir_new_record ir_old_record = ir_old_record ).
     keep_old_field( iv_fieldname = 'CREATED_AT'  ir_new_record = ir_new_record ir_old_record = ir_old_record ).
     keep_old_field( iv_fieldname = 'CREATEDAT'   ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'ERNAM'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'ERDAT'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'ERZET'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
 
     ASSIGN ir_new_record->* TO FIELD-SYMBOL(<record>).
     IF <record> IS ASSIGNED.
@@ -1184,37 +1263,105 @@ ENDMETHOD.
   METHOD apply_admin_on_insert.
     DATA lr_record TYPE REF TO data.
     GET REFERENCE OF cs_record INTO lr_record.
-    DATA lv_ts TYPE timestampl.
+    DATA lv_ts   TYPE timestampl.
+    DATA lv_date TYPE dats.
+    DATA lv_time TYPE tims.
     GET TIME STAMP FIELD lv_ts.
 
+    CONVERT TIME STAMP lv_ts TIME ZONE sy-zonlo
+      INTO DATE lv_date TIME lv_time.
+
+    " ===== CREATED BY (user) - các biến thể tên field =====
     fill_user_field( iv_fieldname = 'CREATED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CREATEDBY'       ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CREATED_BY_USER' ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CREATED_USER'    ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CREATOR'         ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CRE_USER'        ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CRUSER'          ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'ERNAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
+    fill_user_field( iv_fieldname = 'USNAM'           ir_record = lr_record iv_force = abap_true ). " một số bảng dùng USNAM cho created
+
+    " ===== CHANGED BY (user) khi mới tạo -> giống created =====
     fill_user_field( iv_fieldname = 'CHANGED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CHANGEDBY'       ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHANGED_BY_USER' ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'LAST_CHANGED_BY' ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'MODIFIED_BY'     ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'UPDATED_BY'      ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHG_USER'        ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHUSER'          ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'AENAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
 
+    " ===== CREATED AT (timestamp kiểu TIMESTAMP/TIMESTAMPL) =====
     fill_timestamp_field( iv_fieldname = 'CREATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CREATEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CREATED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CREATE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CREATED_TIMESTAMP'     ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'LOCAL_CREATED_AT'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+
     fill_timestamp_field( iv_fieldname = 'CHANGED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CHANGEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LAST_CHANGED_AT'       ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'UPDATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'MODIFIED_AT'           ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LOCAL_LAST_CHANGED_AT' ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+
+    " ===== ERDAT/ERZET & AEDAT/AEZET (classic SAP - DATS/TIMS riêng biệt) =====
+    fill_date_field( iv_fieldname = 'ERDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'ERZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+    fill_date_field( iv_fieldname = 'AEDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'AEZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+
+    " ===== các biến thể DATS/TIMS khác hay gặp =====
+    fill_date_field( iv_fieldname = 'CRDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'CRTIM' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+    fill_date_field( iv_fieldname = 'CDAT'  ir_record = lr_record iv_date = lv_date iv_force = abap_true ). " change date
+    fill_time_field( iv_fieldname = 'CTIM'  ir_record = lr_record iv_time = lv_time iv_force = abap_true ). " change time
   ENDMETHOD.
 
   METHOD apply_admin_on_update.
     DATA lr_record TYPE REF TO data.
     GET REFERENCE OF cs_record INTO lr_record.
-    DATA lv_ts TYPE timestampl.
+    DATA lv_ts   TYPE timestampl.
+    DATA lv_date TYPE dats.
+    DATA lv_time TYPE tims.
     GET TIME STAMP FIELD lv_ts.
 
+    CONVERT TIME STAMP lv_ts TIME ZONE sy-zonlo
+      INTO DATE lv_date TIME lv_time.
+
+    " ===== CHANGED BY (user) =====
     fill_user_field( iv_fieldname = 'CHANGED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CHANGEDBY'       ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHANGED_BY_USER' ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'LAST_CHANGED_BY' ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'MODIFIED_BY'     ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'UPDATED_BY'      ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHG_USER'        ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHUSER'          ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'AENAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
 
+    " ===== CHANGED AT (timestamp) =====
     fill_timestamp_field( iv_fieldname = 'CHANGED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CHANGEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LAST_CHANGED_AT'       ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'UPDATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'MODIFIED_AT'           ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LOCAL_LAST_CHANGED_AT' ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+
+    " ===== AEDAT/AEZET (classic SAP) =====
+    fill_date_field( iv_fieldname = 'AEDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'AEZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+
+    " ===== biến thể khác =====
+    fill_date_field( iv_fieldname = 'CDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'CTIM' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
   ENDMETHOD.
 
   METHOD fill_client.
@@ -1317,7 +1464,7 @@ ENDMETHOD.
     IF sy-subrc <> 0. rv_is_fk = abap_false. ENDIF.
   ENDMETHOD.
 
-  METHOD fill_user_field.
+ METHOD  fill_user_field.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
     IF sy-subrc <> 0. RETURN. ENDIF.
 
@@ -1332,17 +1479,51 @@ ENDMETHOD.
     IF sy-subrc <> 0. RETURN. ENDIF.
 
     ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record> TO FIELD-SYMBOL(<lv_timestamp>).
-    IF sy-subrc = 0 AND ( iv_force = abap_true OR <lv_timestamp> IS INITIAL ).
-      TRY.
-          DATA(lo_type) = cl_abap_typedescr=>describe_by_data( <lv_timestamp> ).
-          IF lo_type->type_kind = cl_abap_typedescr=>typekind_int8.
+    IF sy-subrc <> 0. RETURN. ENDIF.
+    IF iv_force = abap_false AND <lv_timestamp> IS NOT INITIAL. RETURN. ENDIF.
+
+    " Thử gán trực tiếp trước — đúng cho field kiểu TIMESTAMPL (khớp type với iv_timestamp).
+    " Nếu field là kiểu khác (vd UTCLONG) thì assignment lệch kiểu sẽ raise exception,
+    " lúc đó fallback sang utclong_current() — tương thích với cả UTCLONG lẫn INT8.
+    TRY.
+        <lv_timestamp> = iv_timestamp.
+      CATCH cx_root.
+        TRY.
             <lv_timestamp> = utclong_current( ).
-          ELSE.
-            <lv_timestamp> = iv_timestamp.
-          ENDIF.
-        CATCH cx_root.
-      ENDTRY.
-    ENDIF.
+          CATCH cx_root.
+            " Field không tương thích với cả 2 cách gán -> thật sự không set được.
+        ENDTRY.
+    ENDTRY.
+ENDMETHOD.
+  METHOD fill_date_field.
+    ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record> TO FIELD-SYMBOL(<lv_field>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    IF iv_force = abap_false AND <lv_field> IS NOT INITIAL. RETURN. ENDIF.
+
+    TRY.
+        <lv_field> = iv_date.
+      CATCH cx_root.
+        " sai type (không phải DATS) -> bỏ qua, không set
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD fill_time_field.
+    ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record> TO FIELD-SYMBOL(<lv_field>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    IF iv_force = abap_false AND <lv_field> IS NOT INITIAL. RETURN. ENDIF.
+
+    TRY.
+        <lv_field> = iv_time.
+      CATCH cx_root.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD keep_old_field.
@@ -1823,6 +2004,4 @@ METHOD build_where_clause.
   ENDMETHOD.
 
 ENDCLASS.
-
-
 

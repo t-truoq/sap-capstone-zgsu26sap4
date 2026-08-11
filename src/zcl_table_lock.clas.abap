@@ -17,7 +17,7 @@ CLASS zcl_table_lock DEFINITION
 
     CONSTANTS c_default_ttl_seconds TYPE i VALUE 300.
 
-    "! Acquire lock. Nếu đang bị session khác giữ và còn hạn → zcx_error.
+    "! Acquire lock. Nếu đang bị session khác giữ và còn hạn → zcx_excel_pipeline.
     "! Cùng session gọi lại = gia hạn (idempotent).
     CLASS-METHODS acquire_lock
       IMPORTING iv_table_name  TYPE ztde_table_name
@@ -26,23 +26,23 @@ CLASS zcl_table_lock DEFINITION
                 iv_lock_scope  TYPE ztde_lock_scope  DEFAULT c_scope-table
                 iv_record_key  TYPE ztde_record_key  OPTIONAL
                 iv_ttl_seconds TYPE i                DEFAULT c_default_ttl_seconds
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS release_lock
       IMPORTING iv_table_name TYPE ztde_table_name
                 iv_session_id TYPE sysuuid_c32
                 iv_lock_scope TYPE ztde_lock_scope DEFAULT c_scope-table
                 iv_record_key TYPE ztde_record_key OPTIONAL
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
-    "! Gia hạn lock của chính session. Nếu lock đã mất/hết hạn → zcx_error.
+    "! Gia hạn lock của chính session. Nếu lock đã mất/hết hạn → zcx_excel_pipeline.
     CLASS-METHODS heartbeat
       IMPORTING iv_table_name  TYPE ztde_table_name
                 iv_session_id  TYPE sysuuid_c32
                 iv_lock_scope  TYPE ztde_lock_scope DEFAULT c_scope-table
                 iv_record_key  TYPE ztde_record_key OPTIONAL
                 iv_ttl_seconds TYPE i               DEFAULT c_default_ttl_seconds
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     "! Bắt buộc trước mọi write: lock phải còn hạn và thuộc về session hiện tại.
     CLASS-METHODS assert_locked_by_me
@@ -50,13 +50,13 @@ CLASS zcl_table_lock DEFINITION
                 iv_session_id TYPE sysuuid_c32
                 iv_lock_scope TYPE ztde_lock_scope DEFAULT c_scope-table
                 iv_record_key TYPE ztde_record_key OPTIONAL
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     "! Admin force unlock (cần CAN_FORCE_UNLOCK). Xoá mọi lock của bảng.
     CLASS-METHODS force_release
       IMPORTING iv_table_name TYPE ztde_table_name
                 iv_username   TYPE syuname DEFAULT sy-uname
-      RAISING   zcx_error.
+      RAISING   zcx_excel_pipeline.
 
     "! Xoá lock đã hết hạn (gọi đầu acquire, hoặc job dọn dẹp).
     CLASS-METHODS cleanup_expired_locks.
@@ -98,11 +98,10 @@ CLASS zcl_table_lock IMPLEMENTATION.
     IF sy-subrc = 0 AND ls_existing-expires_at >= lv_now.
       " Lock còn hạn → chỉ chủ session cũ được gia hạn
       IF ls_existing-session_id <> iv_session_id.
-        RAISE EXCEPTION TYPE zcx_error
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
           EXPORTING
-            textid        = zcx_error=>lock_owned_by_other_user
-            iv_table_name = CONV string( iv_table_name )
-            iv_locked_by  = ls_existing-locked_by.
+            iv_text      = |{ iv_table_name } đang bị khoá bởi { ls_existing-locked_by }|
+            iv_locked_by = ls_existing-locked_by.
       ENDIF.
     ENDIF.
 
@@ -122,10 +121,8 @@ CLASS zcl_table_lock IMPLEMENTATION.
     cleanup_expired_locks( ).
 
     IF iv_session_id IS INITIAL.
-      RAISE EXCEPTION TYPE zcx_error
-        EXPORTING
-          textid        = zcx_error=>lock_session_missing
-          iv_table_name = CONV string( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Missing lock session for { iv_table_name }|.
     ENDIF.
 
     DELETE FROM ztbl_lock
@@ -142,18 +139,15 @@ CLASS zcl_table_lock IMPLEMENTATION.
           AND record_key = @iv_record_key
         INTO @DATA(lv_locked_by).
 
-      IF sy-subrc = 0.
-        RAISE EXCEPTION TYPE zcx_error
-              EXPORTING
-                textid        = zcx_error=>lock_owned_by_other_user
-                iv_table_name = CONV string( iv_table_name )
-                iv_locked_by  = lv_locked_by.
-      ELSE.
-        RAISE EXCEPTION TYPE zcx_error
-              EXPORTING
-                textid        = zcx_error=>lock_expired_or_missing
-                iv_table_name = CONV string( iv_table_name ).
-      ENDIF.
+      DATA(lv_text) = COND string(
+        WHEN sy-subrc = 0
+        THEN |Lock for { iv_table_name } is owned by { lv_locked_by }|
+        ELSE |Lock for { iv_table_name } does not exist or has expired| ).
+
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING
+          iv_text      = lv_text
+          iv_locked_by = lv_locked_by.
     ENDIF.
   ENDMETHOD.
 
@@ -170,10 +164,8 @@ CLASS zcl_table_lock IMPLEMENTATION.
         AND session_id = @iv_session_id.
 
     IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_error
-            EXPORTING
-              textid        = zcx_error=>lock_expired_or_missing
-              iv_table_name = CONV string( iv_table_name ).
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING iv_text = |Lock cho { iv_table_name } đã hết hạn hoặc bị giải phóng|.
     ENDIF.
   ENDMETHOD.
 
@@ -190,11 +182,10 @@ CLASS zcl_table_lock IMPLEMENTATION.
     IF sy-subrc <> 0
        OR ls_lock-expires_at < lv_now
        OR ls_lock-session_id <> iv_session_id.
-      RAISE EXCEPTION TYPE zcx_error
-            EXPORTING
-              textid        = zcx_error=>lock_not_held_by_caller
-              iv_table_name = CONV string( iv_table_name )
-              iv_locked_by  = ls_lock-locked_by.
+      RAISE EXCEPTION TYPE zcx_excel_pipeline
+        EXPORTING
+          iv_text      = |Bạn chưa giữ lock hợp lệ cho { iv_table_name }. Hãy acquire lock trước khi ghi.|
+          iv_locked_by = ls_lock-locked_by.
     ENDIF.
   ENDMETHOD.
 
@@ -212,6 +203,3 @@ CLASS zcl_table_lock IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
-
-
-

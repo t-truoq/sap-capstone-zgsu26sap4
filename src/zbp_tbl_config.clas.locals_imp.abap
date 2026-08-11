@@ -1234,22 +1234,32 @@ CLASS lhc_tblconfig IMPLEMENTATION.
  IF sy-subrc = 0. CONTINUE. ENDIF.
 
  DATA(lv_field_type) = SWITCH #( ls_field-inttype
- WHEN 'D' THEN 'DATE'
- WHEN 'X' THEN
- COND ztde_field_type(
- WHEN ls_field-domname CS 'UUID' THEN 'TEXT'
- WHEN ls_field-domname CS 'SYSUUID' THEN 'TEXT'
- WHEN ls_field-leng = 16 THEN 'TEXT'
- ELSE 'CHECK'
- )
- WHEN 'P' THEN 'TEXT'
- WHEN 'I' THEN 'TEXT'
- WHEN 'N' THEN 'TEXT'
- ELSE COND #(
- WHEN ls_field-domname IS NOT INITIAL THEN 'DOMAIN'
- ELSE 'TEXT'
- )
- ).
+  WHEN 'D' THEN 'DATE'
+  WHEN 'T' THEN 'TIME'
+  WHEN 'X' THEN
+    COND ztde_field_type(
+      WHEN ls_field-domname CS 'UUID'    THEN 'TEXT'
+      WHEN ls_field-domname CS 'SYSUUID' THEN 'TEXT'
+      WHEN ls_field-leng = 16            THEN 'TEXT'
+      WHEN ls_field-leng = 1             THEN 'CHECK'
+      ELSE 'TEXT'
+    )
+  WHEN 'P' THEN 'AMOUNT'    " hoặc 'NUMBER' / 'DECIMAL' tùy enum ztde_field_type của bạn
+  WHEN 'F' THEN 'AMOUNT'
+  WHEN 'I' THEN 'NUMBER'
+  WHEN '8' THEN 'NUMBER'    " INT8 nếu có dùng
+  WHEN 'b' THEN 'NUMBER'    " INT1
+  WHEN 's' THEN 'NUMBER'    " INT2
+  WHEN 'N' THEN
+    COND ztde_field_type(
+      WHEN ls_field-domname IS NOT INITIAL THEN 'DOMAIN'
+      ELSE 'TEXT'
+    )
+  ELSE COND #(
+    WHEN ls_field-domname IS NOT INITIAL THEN 'DOMAIN'
+    ELSE 'TEXT'
+  )
+).
 
  DATA(lv_label) = CONV dd04t-reptext( '' ).
  IF ls_field-rollname IS NOT INITIAL.
@@ -1707,10 +1717,10 @@ ENDMETHOD.
 
  TRY.
  zcl_table_lock=>heartbeat(
- iv_table_name  = CONV #( ls_config-tablename )
+ iv_table_name  = ls_config-tablename
  iv_session_id  = ls_param-session_id
  iv_lock_scope  = lv_scope
- iv_record_key  = CONV #( ls_param-record_key )
+ iv_record_key  = ls_param-record_key
  iv_ttl_seconds = lv_ttl ).
 
  SELECT SINGLE locked_by, expires_at
