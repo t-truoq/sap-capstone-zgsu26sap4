@@ -12,7 +12,11 @@ define root view entity ZI_TBL_CONFIG
   key config_uuid       as ConfigUuid,
       table_name        as TableName,
       description       as Description,
+
+      @Semantics.booleanIndicator: true
       approval_required as ApprovalRequired,
+
+      @Semantics.booleanIndicator: true
       active_flag       as ActiveFlag,
 
       _FieldConfig

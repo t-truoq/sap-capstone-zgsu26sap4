@@ -186,7 +186,17 @@ CLASS-METHODS fill_client
                 ir_record    TYPE REF TO data
                 iv_timestamp TYPE timestampl
                 iv_force     TYPE abap_bool DEFAULT abap_false.
+CLASS-METHODS fill_date_field
+      IMPORTING iv_fieldname TYPE fieldname
+                ir_record    TYPE REF TO data
+                iv_date      TYPE dats
+                iv_force     TYPE abap_bool DEFAULT abap_false.
 
+    CLASS-METHODS fill_time_field
+      IMPORTING iv_fieldname TYPE fieldname
+                ir_record    TYPE REF TO data
+                iv_time      TYPE tims
+                iv_force     TYPE abap_bool DEFAULT abap_false.
     CLASS-METHODS keep_old_field
       IMPORTING iv_fieldname  TYPE fieldname
                 ir_new_record TYPE REF TO data
@@ -221,6 +231,12 @@ CLASS-METHODS fill_client
     CLASS-METHODS build_validation_message
       IMPORTING it_errors TYPE tt_validation_errors
       RETURNING VALUE(rv_msg) TYPE string.
+
+
+      CLASS-METHODS compare_etag
+      IMPORTING iv_db_value    TYPE any
+                iv_fe_value    TYPE string
+      RETURNING VALUE(rv_same) TYPE abap_bool.
 ENDCLASS.
 
 
@@ -341,41 +357,15 @@ METHOD update_record.
         " FE đã nhận lúc load record ban đầu.
         DATA(lv_old_json) = zcl_dyn_record_handler=>serialize( <ls_old> ).
 
-       "── Optimistic lock ──
+      "── Optimistic lock ──
         IF iv_etag_field IS NOT INITIAL AND iv_etag_value IS NOT INITIAL.
           ASSIGN COMPONENT iv_etag_field OF STRUCTURE <ls_old>
             TO FIELD-SYMBOL(<lv_etag_db>).
 
           IF sy-subrc = 0.
-            DATA(lv_etag_ok) = abap_false.
-
-            TRY.
-                " Parse iv_etag_value (format "yyyy-mm-dd hh:mm:ss.fffffff") thành timestampl
-                DATA lv_etag_parsed TYPE timestampl.
-                DATA(lv_etag_raw) = iv_etag_value.
-
-                DATA lv_date TYPE d.
-                DATA lv_time TYPE t.
-                lv_date = lv_etag_raw+0(4) && lv_etag_raw+5(2) && lv_etag_raw+8(2).
-                lv_time = lv_etag_raw+11(2) && lv_etag_raw+14(2) && lv_etag_raw+17(2).
-
-                CONVERT DATE lv_date TIME lv_time
-                  INTO TIME STAMP lv_etag_parsed TIME ZONE 'UTC'.
-
-                " So sánh dung sai 1 giây để tránh lệch precision khi round-trip qua DB
-                DATA(lv_diff) = abs( cl_abap_tstmp=>subtract(
-                  tstmp1 = CONV timestamp( <lv_etag_db> )
-                  tstmp2 = CONV timestamp( lv_etag_parsed ) ) ).
-
-                IF lv_diff <= 1.
-                  lv_etag_ok = abap_true.
-                ENDIF.
-              CATCH cx_root.
-                " parse fail → fallback so sánh chuỗi thô, giữ hành vi an toàn
-                lv_etag_ok = boolc( condense( |{ <lv_etag_db> }| ) = condense( iv_etag_value ) ).
-            ENDTRY.
-
-            IF lv_etag_ok = abap_false.
+            IF compare_etag(
+                 iv_db_value  = <lv_etag_db>
+                 iv_fe_value  = iv_etag_value ) = abap_false.
               rs_result = VALUE #(
                 success = abap_false
                 message = 'Optimistic lock failed: record was modified by another user'
@@ -1227,10 +1217,28 @@ ENDMETHOD.
   METHOD on_update.
     fill_client( ir_record = ir_new_record ).
 
-    keep_old_field( iv_fieldname = 'CREATED_BY'  ir_new_record = ir_new_record ir_old_record = ir_old_record ).
-    keep_old_field( iv_fieldname = 'CREATEDBY'   ir_new_record = ir_new_record ir_old_record = ir_old_record ).
-    keep_old_field( iv_fieldname = 'CREATED_AT'  ir_new_record = ir_new_record ir_old_record = ir_old_record ).
-    keep_old_field( iv_fieldname = 'CREATEDAT'   ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    " CREATED BY - user
+    keep_old_field( iv_fieldname = 'CREATED_BY'      ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATEDBY'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATED_BY_USER' ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATED_USER'    ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATOR'         ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CRE_USER'        ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CRUSER'          ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'ERNAM'           ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'USNAM'           ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+
+    " CREATED AT - timestamp/date/time
+    keep_old_field( iv_fieldname = 'CREATED_AT'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATEDAT'        ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATED_ON'       ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATE_TIMESTAMP' ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CREATED_TIMESTAMP' ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'LOCAL_CREATED_AT' ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'ERDAT'            ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'ERZET'            ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CRDAT'            ir_new_record = ir_new_record ir_old_record = ir_old_record ).
+    keep_old_field( iv_fieldname = 'CRTIM'            ir_new_record = ir_new_record ir_old_record = ir_old_record ).
 
     ASSIGN ir_new_record->* TO FIELD-SYMBOL(<record>).
     IF <record> IS ASSIGNED.
@@ -1238,42 +1246,137 @@ ENDMETHOD.
     ENDIF.
   ENDMETHOD.
 
+
   METHOD apply_admin_on_insert.
     DATA lr_record TYPE REF TO data.
     GET REFERENCE OF cs_record INTO lr_record.
-    DATA lv_ts TYPE timestampl.
+    DATA lv_ts   TYPE timestampl.
+    DATA lv_date TYPE dats.
+    DATA lv_time TYPE tims.
     GET TIME STAMP FIELD lv_ts.
 
+    CONVERT TIME STAMP lv_ts TIME ZONE sy-zonlo
+      INTO DATE lv_date TIME lv_time.
+
+    " ===== CREATED BY (user) - các biến thể tên field =====
     fill_user_field( iv_fieldname = 'CREATED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CREATEDBY'       ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CREATED_BY_USER' ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CREATED_USER'    ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CREATOR'         ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CRE_USER'        ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CRUSER'          ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'ERNAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
+    fill_user_field( iv_fieldname = 'USNAM'           ir_record = lr_record iv_force = abap_true ). " một số bảng dùng USNAM cho created
+
+    " ===== CHANGED BY (user) khi mới tạo -> giống created =====
     fill_user_field( iv_fieldname = 'CHANGED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CHANGEDBY'       ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHANGED_BY_USER' ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'LAST_CHANGED_BY' ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'MODIFIED_BY'     ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'UPDATED_BY'      ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHG_USER'        ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHUSER'          ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'AENAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
 
+    " ===== CREATED AT (timestamp kiểu TIMESTAMP/TIMESTAMPL) =====
     fill_timestamp_field( iv_fieldname = 'CREATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CREATEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CREATED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CREATE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CREATED_TIMESTAMP'     ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'LOCAL_CREATED_AT'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+
     fill_timestamp_field( iv_fieldname = 'CHANGED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CHANGEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LAST_CHANGED_AT'       ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'UPDATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'MODIFIED_AT'           ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LOCAL_LAST_CHANGED_AT' ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+
+    fill_date_field( iv_fieldname = 'ERDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'ERZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+    fill_date_field( iv_fieldname = 'AEDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'AEZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+
+    fill_date_field( iv_fieldname = 'CRDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'CRTIM' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+    fill_date_field( iv_fieldname = 'CDAT'  ir_record = lr_record iv_date = lv_date iv_force = abap_true ). " change date
+    fill_time_field( iv_fieldname = 'CTIM'  ir_record = lr_record iv_time = lv_time iv_force = abap_true ). " change time
   ENDMETHOD.
 
   METHOD apply_admin_on_update.
     DATA lr_record TYPE REF TO data.
     GET REFERENCE OF cs_record INTO lr_record.
-    DATA lv_ts TYPE timestampl.
+    DATA lv_ts   TYPE timestampl.
+    DATA lv_date TYPE dats.
+    DATA lv_time TYPE tims.
     GET TIME STAMP FIELD lv_ts.
 
+    CONVERT TIME STAMP lv_ts TIME ZONE sy-zonlo
+      INTO DATE lv_date TIME lv_time.
+
+    " ===== CHANGED BY (user) =====
     fill_user_field( iv_fieldname = 'CHANGED_BY'      ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'CHANGEDBY'       ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHANGED_BY_USER' ir_record = lr_record iv_force = abap_true ).
     fill_user_field( iv_fieldname = 'LAST_CHANGED_BY' ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'MODIFIED_BY'     ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'UPDATED_BY'      ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHG_USER'        ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'CHUSER'          ir_record = lr_record iv_force = abap_true ).
+    fill_user_field( iv_fieldname = 'AENAM'           ir_record = lr_record iv_force = abap_true ). " classic SAP
 
+    " ===== CHANGED AT (timestamp) =====
     fill_timestamp_field( iv_fieldname = 'CHANGED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'CHANGEDAT'             ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGED_ON'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LAST_CHANGED_AT'       ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'UPDATED_AT'            ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'MODIFIED_AT'           ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+    fill_timestamp_field( iv_fieldname = 'CHANGE_TIMESTAMP'      ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
     fill_timestamp_field( iv_fieldname = 'LOCAL_LAST_CHANGED_AT' ir_record = lr_record iv_timestamp = lv_ts iv_force = abap_true ).
+
+    " ===== AEDAT/AEZET (classic SAP) =====
+    fill_date_field( iv_fieldname = 'AEDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'AEZET' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+
+    " ===== biến thể khác =====
+    fill_date_field( iv_fieldname = 'CDAT' ir_record = lr_record iv_date = lv_date iv_force = abap_true ).
+    fill_time_field( iv_fieldname = 'CTIM' ir_record = lr_record iv_time = lv_time iv_force = abap_true ).
+  ENDMETHOD.
+  METHOD fill_date_field.
+    ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record> TO FIELD-SYMBOL(<lv_field>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    IF iv_force = abap_false AND <lv_field> IS NOT INITIAL. RETURN. ENDIF.
+
+    TRY.
+        <lv_field> = iv_date.
+      CATCH cx_root.
+    ENDTRY.
   ENDMETHOD.
 
+  METHOD fill_time_field.
+    ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record> TO FIELD-SYMBOL(<lv_field>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
+
+    IF iv_force = abap_false AND <lv_field> IS NOT INITIAL. RETURN. ENDIF.
+
+    TRY.
+        <lv_field> = iv_time.
+      CATCH cx_root.
+    ENDTRY.
+  ENDMETHOD.
   METHOD fill_client.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
     IF sy-subrc <> 0. RETURN. ENDIF.
@@ -1883,5 +1986,65 @@ METHOD build_where_clause.
         ELSE rv_msg && `; ` && ls_error-message ).
     ENDLOOP.
   ENDMETHOD.
+METHOD compare_etag.
+    DATA(lo_type) = cl_abap_typedescr=>describe_by_data( iv_db_value ).
 
+    TRY.
+        CASE lo_type->type_kind.
+
+          WHEN cl_abap_typedescr=>typekind_date.
+            " FE gửi ISO "yyyy-mm-dd" → parse thành DATS rồi so trực tiếp
+            DATA lv_fe_date TYPE d.
+            DATA(lv_fe_raw) = iv_fe_value.
+            IF strlen( lv_fe_raw ) >= 10.
+              lv_fe_date = lv_fe_raw+0(4) && lv_fe_raw+5(2) && lv_fe_raw+8(2).
+            ELSE.
+              lv_fe_date = lv_fe_raw.  " fallback nếu FE gửi thẳng YYYYMMDD
+            ENDIF.
+            rv_same = boolc( iv_db_value = lv_fe_date ).
+
+          WHEN cl_abap_typedescr=>typekind_time.
+            DATA lv_fe_time TYPE t.
+            DATA(lv_fe_traw) = iv_fe_value.
+            IF strlen( lv_fe_traw ) >= 8.
+              lv_fe_time = lv_fe_traw+0(2) && lv_fe_traw+3(2) && lv_fe_traw+6(2).
+            ELSE.
+              lv_fe_time = lv_fe_traw.
+            ENDIF.
+            rv_same = boolc( iv_db_value = lv_fe_time ).
+
+          WHEN cl_abap_typedescr=>typekind_packed
+            OR cl_abap_typedescr=>typekind_decfloat
+            OR cl_abap_typedescr=>typekind_decfloat16
+            OR cl_abap_typedescr=>typekind_decfloat34
+            OR cl_abap_typedescr=>typekind_utclong.
+            " TIMESTAMPL / UTCLONG: parse "yyyy-mm-dd hh:mm:ss.fffffff" và so
+            " sánh với dung sai nhỏ để tránh lệch precision khi round-trip qua DB
+            DATA lv_ts_parsed TYPE timestampl.
+            DATA(lv_ts_raw) = iv_fe_value.
+
+            DATA lv_pdate TYPE d.
+            DATA lv_ptime TYPE t.
+            lv_pdate = lv_ts_raw+0(4) && lv_ts_raw+5(2) && lv_ts_raw+8(2).
+            lv_ptime = lv_ts_raw+11(2) && lv_ts_raw+14(2) && lv_ts_raw+17(2).
+
+            CONVERT DATE lv_pdate TIME lv_ptime
+              INTO TIME STAMP lv_ts_parsed TIME ZONE 'UTC'.
+
+            DATA(lv_diff) = abs( cl_abap_tstmp=>subtract(
+              tstmp1 = CONV timestamp( iv_db_value )
+              tstmp2 = CONV timestamp( lv_ts_parsed ) ) ).
+
+            rv_same = boolc( lv_diff <= 1 ).
+
+          WHEN OTHERS.
+            " CHAR/NUMC/khác: so chuỗi sau khi condense
+            rv_same = boolc( condense( |{ iv_db_value }| ) = condense( iv_fe_value ) ).
+        ENDCASE.
+
+      CATCH cx_root.
+        " Parse fail → fallback so chuỗi thô, không để crash làm hỏng update
+        rv_same = boolc( condense( |{ iv_db_value }| ) = condense( iv_fe_value ) ).
+    ENDTRY.
+  ENDMETHOD.
 ENDCLASS.
