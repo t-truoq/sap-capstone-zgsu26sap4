@@ -10,4 +10,12 @@ define abstract entity ZDT_EXCEL_DIFF_ROW
       new_value  : abap.string;
       status     : abap.char(10);
       message    : abap.string;
+      parsed_rows : abap.int4;
+      action_rows : abap.int4;
+      new_count : abap.int4;
+      changed_count : abap.int4;
+      deleted_count : abap.int4;
+      skipped_count : abap.int4;
+      error_count : abap.int4;
+      commit_records : abap.int4;
 }
