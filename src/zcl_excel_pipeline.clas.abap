@@ -59,7 +59,7 @@ CLASS zcl_excel_pipeline DEFINITION
                  delete TYPE ztde_action_type VALUE 'D',
                END OF c_action.
 
-    CONSTANTS c_skip_client TYPE abap_bool VALUE abap_false.
+    CONSTANTS c_skip_client TYPE abap_bool VALUE abap_true.
 
     TYPES:
       BEGIN OF ty_item,
@@ -391,6 +391,7 @@ CLASS zcl_excel_pipeline DEFINITION
     CLASS-METHODS get_key_problem
       IMPORTING iv_table_name      TYPE tabname
                 iv_entity_id_field TYPE fieldname
+                iv_action          TYPE string
                 it_biz_keys        TYPE string_table
                 it_cells           TYPE tt_cell
       RETURNING VALUE(rv_message)  TYPE string.
@@ -706,9 +707,6 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       WHEN 'MANDT' OR 'CLIENT'.
         rv_admin = c_skip_client.
 
-      WHEN 'ENTITY_ID'.
-        rv_admin = abap_true.
-
       WHEN OTHERS.
         rv_admin = abap_false.
     ENDCASE.
@@ -812,11 +810,6 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD is_importable_field.
-    IF iv_is_key = abap_true AND normalize( iv_fieldname ) = 'ENTITY_ID'.
-      rv_importable = abap_true.
-      RETURN.
-    ENDIF.
-
     IF is_admin_field( iv_fieldname ) = abap_true.
       rv_importable = abap_false.
       RETURN.
@@ -849,6 +842,21 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD is_importable_field_for_table.
+    IF is_field-field_name = 'MANDT' OR is_field-field_name = 'CLIENT'.
+      rv_importable = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF zcl_dyn_record_handler=>is_generated_technical_key(
+         iv_table_name = iv_table_name
+         iv_fieldname  = is_field-field_name ) = abap_true
+       OR is_fk_key_field(
+            iv_table_name = iv_table_name
+            iv_field_name = is_field-field_name ) = abap_true.
+      rv_importable = abap_true.
+      RETURN.
+    ENDIF.
+
     rv_importable = is_importable_field_info( is_field ).
     IF rv_importable = abap_false.
       RETURN.
@@ -865,10 +873,6 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       it_fields     = it_fields
       iv_table_name = iv_table_name ).
 
-    IF normalize( is_field-field_name ) = 'ENTITY_ID'.
-      RETURN.
-    ENDIF.
-
     READ TABLE lt_match TRANSPORTING NO FIELDS
       WITH KEY table_line = CONV string( is_field-field_name ).
     IF sy-subrc <> 0.
@@ -879,13 +883,13 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   METHOD get_match_key_fields.
     CLEAR rt_keys.
 
-    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
-
     LOOP AT it_fields INTO DATA(ls_field).
       IF is_config_flag( ls_field-is_key_field ) = abap_false.
         CONTINUE.
       ENDIF.
-      IF lv_eid_f IS NOT INITIAL AND ls_field-field_name = lv_eid_f.
+      IF zcl_dyn_record_handler=>is_generated_technical_key(
+           iv_table_name = iv_table_name
+           iv_fieldname  = ls_field-field_name ) = abap_true.
         CONTINUE.
       ENDIF.
       IF ls_field-field_name = 'MANDT' OR ls_field-field_name = 'CLIENT'.
@@ -908,8 +912,10 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
 
   METHOD get_entity_id_field.
     LOOP AT get_ddic_key_fields( iv_table_name ) INTO DATA(lv_k).
-      IF lv_k = 'ENTITY_ID'.
-        rv_field = 'ENTITY_ID'.
+      IF zcl_dyn_record_handler=>is_generated_technical_key(
+           iv_table_name = iv_table_name
+           iv_fieldname  = CONV fieldname( lv_k ) ) = abap_true.
+        rv_field = CONV fieldname( lv_k ).
         RETURN.
       ENDIF.
     ENDLOOP.
@@ -969,54 +975,27 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   METHOD build_record_key_json.
     DATA lv_first TYPE abap_bool VALUE abap_true.
     rv_json = '{'.
-
-    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
+    DATA(lt_keys) = get_ddic_key_fields( iv_table_name ).
 
     IF ir_row IS BOUND.
       ASSIGN ir_row->* TO FIELD-SYMBOL(<row>).
-      IF lv_eid_f IS NOT INITIAL.
-        ASSIGN COMPONENT lv_eid_f OF STRUCTURE <row> TO FIELD-SYMBOL(<eid>).
-        IF sy-subrc = 0 AND <eid> IS NOT INITIAL.
-          append_json_key_value(
-            EXPORTING iv_key = CONV string( lv_eid_f ) iv_value = |{ <eid> }|
-            CHANGING  cv_json = rv_json cv_first = lv_first ).
-          rv_json = rv_json && '}'.
-          RETURN.
-        ENDIF.
-      ENDIF.
-
-      DATA(lt_biz) = get_match_key_fields(
-        it_fields     = it_fields
-        iv_table_name = iv_table_name ).
-      LOOP AT lt_biz INTO DATA(lv_bk).
-        ASSIGN COMPONENT lv_bk OF STRUCTURE <row> TO FIELD-SYMBOL(<bv>).
+      LOOP AT lt_keys INTO DATA(lv_key).
+        ASSIGN COMPONENT lv_key OF STRUCTURE <row> TO FIELD-SYMBOL(<key_value>).
         IF sy-subrc = 0.
           append_json_key_value(
-            EXPORTING iv_key = lv_bk iv_value = |{ <bv> }|
+            EXPORTING iv_key = lv_key iv_value = |{ <key_value> }|
             CHANGING  cv_json = rv_json cv_first = lv_first ).
         ENDIF.
       ENDLOOP.
     ENDIF.
 
     IF it_cells IS SUPPLIED AND it_cells IS NOT INITIAL.
-      IF lv_eid_f IS NOT INITIAL.
-        DATA(lv_eid_val) = get_cell_value( it_cells = it_cells iv_field = lv_eid_f ).
-        IF lv_eid_val IS NOT INITIAL.
-          append_json_key_value(
-            EXPORTING iv_key = CONV string( lv_eid_f ) iv_value = lv_eid_val
-            CHANGING  cv_json = rv_json cv_first = lv_first ).
-          rv_json = rv_json && '}'.
-          RETURN.
-        ENDIF.
-      ENDIF.
-
-      lt_biz = get_match_key_fields(
-        it_fields     = it_fields
-        iv_table_name = iv_table_name ).
-      LOOP AT lt_biz INTO lv_bk.
-        DATA(lv_cv) = get_cell_value( it_cells = it_cells iv_field = CONV #( lv_bk ) ).
+      LOOP AT lt_keys INTO lv_key.
+        DATA(lv_cv) = get_cell_value(
+          it_cells = it_cells
+          iv_field = CONV fieldname( lv_key ) ).
         append_json_key_value(
-          EXPORTING iv_key = lv_bk iv_value = lv_cv
+          EXPORTING iv_key = lv_key iv_value = lv_cv
           CHANGING  cv_json = rv_json cv_first = lv_first ).
       ENDLOOP.
     ENDIF.
@@ -1027,54 +1006,44 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   METHOD get_where_key_fields.
     CLEAR rt_keys.
 
-    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
-    IF lv_eid_f IS NOT INITIAL AND iv_record_key IS NOT INITIAL.
-      DATA lr_rec TYPE REF TO data.
-      CREATE DATA lr_rec TYPE (iv_table_name).
-      TRY.
-          zcl_dyn_record_handler=>deserialize(
-            EXPORTING iv_json   = iv_record_key
-            CHANGING  ca_record = lr_rec ).
-        CATCH cx_root INTO DATA(lxj).
-          RAISE EXCEPTION TYPE zcx_excel_pipeline
-            EXPORTING iv_text = |record_key JSON không hợp lệ: { lxj->get_text( ) }|.
-      ENDTRY.
-      ASSIGN lr_rec->* TO FIELD-SYMBOL(<rec>).
-      ASSIGN COMPONENT lv_eid_f OF STRUCTURE <rec> TO FIELD-SYMBOL(<eid>).
-      IF sy-subrc = 0 AND <eid> IS NOT INITIAL.
-        APPEND CONV string( lv_eid_f ) TO rt_keys.
-        RETURN.
-      ENDIF.
+    rt_keys = get_ddic_key_fields( iv_table_name ).
+    IF rt_keys IS INITIAL OR iv_record_key IS INITIAL.
+      RETURN.
     ENDIF.
 
-    rt_keys = get_match_key_fields(
-      it_fields     = it_fields
-      iv_table_name = iv_table_name ).
+    DATA lr_rec TYPE REF TO data.
+    CREATE DATA lr_rec TYPE (iv_table_name).
+    TRY.
+        zcl_dyn_record_handler=>deserialize(
+          EXPORTING iv_json   = iv_record_key
+          CHANGING  ca_record = lr_rec ).
+      CATCH cx_root INTO DATA(lxj).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |record_key JSON khÃ´ng há»£p lá»‡: { lxj->get_text( ) }|.
+    ENDTRY.
+
+    ASSIGN lr_rec->* TO FIELD-SYMBOL(<rec>).
+    LOOP AT rt_keys INTO DATA(lv_key).
+      ASSIGN COMPONENT lv_key OF STRUCTURE <rec> TO FIELD-SYMBOL(<key_value>).
+      IF sy-subrc <> 0 OR <key_value> IS INITIAL.
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING iv_text = |record_key khÃ´ng cÃ³ giÃ¡ trá»‹ cho key { lv_key }.|.
+      ENDIF.
+    ENDLOOP.
+    " The key set is the DDIC key set; do not fall back to a name-based key.
+    RETURN.
+
   ENDMETHOD.
 
   METHOD build_where_from_cells.
-    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
-    IF lv_eid_f IS NOT INITIAL.
-      DATA(lv_eid) = get_cell_value( it_cells = it_cells iv_field = lv_eid_f ).
-      IF lv_eid IS NOT INITIAL.
-        REPLACE ALL OCCURRENCES OF |'| IN lv_eid WITH |''|.
-        rv_where = |{ lv_eid_f } = '{ lv_eid }'|.
-        RETURN.
-      ENDIF.
-
-      READ TABLE it_cells TRANSPORTING NO FIELDS
-        WITH KEY fieldname = lv_eid_f.
-      IF sy-subrc = 0.
-        RETURN.
-      ENDIF.
-    ENDIF.
-
-    DATA(lt_keys) = get_match_key_fields(
-      it_fields     = it_fields
-      iv_table_name = iv_table_name ).
+    DATA(lt_keys) = get_ddic_key_fields( iv_table_name ).
 
     LOOP AT lt_keys INTO DATA(lv_k).
       DATA(lv_val) = get_cell_value( it_cells = it_cells iv_field = CONV #( lv_k ) ).
+      IF lv_val IS INITIAL.
+        CLEAR rv_where.
+        RETURN.
+      ENDIF.
       REPLACE ALL OCCURRENCES OF |'| IN lv_val WITH |''|.
       DATA(lv_cond) = |{ lv_k } = '{ lv_val }'|.
       IF rv_where IS INITIAL.
@@ -1374,11 +1343,9 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
     CLEAR rv_json.
     DATA lv_first TYPE abap_bool VALUE abap_true.
     DATA lt_seen TYPE string_table.
-    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
 
     LOOP AT it_fields INTO DATA(ls_field).
-      IF is_admin_field( ls_field-field_name ) = abap_true
-         AND ls_field-field_name <> lv_eid_f.
+      IF is_admin_field( ls_field-field_name ) = abap_true.
         CONTINUE.
       ENDIF.
 
@@ -1440,7 +1407,6 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
 
     ASSIGN lr_test->* TO FIELD-SYMBOL(<chk>).
     DATA(lv_has_biz) = abap_false.
-    DATA(lv_eid_f) = get_entity_id_field( iv_table_name ).
     DATA(lo_sdesc) = CAST cl_abap_structdescr(
       cl_abap_typedescr=>describe_by_data( <chk> ) ).
 
@@ -1448,7 +1414,9 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       IF ls_comp-name = 'MANDT' OR ls_comp-name = 'CLIENT'.
         CONTINUE.
       ENDIF.
-      IF ls_comp-name = lv_eid_f.
+      IF zcl_dyn_record_handler=>is_generated_technical_key(
+           iv_table_name = iv_table_name
+           iv_fieldname  = CONV fieldname( ls_comp-name ) ) = abap_true.
         CONTINUE.
       ENDIF.
       IF is_admin_timestamp_field( CONV fieldname( ls_comp-name ) ) = abap_true.
@@ -1764,6 +1732,52 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
+      IF lv_requested_action = 'C'.
+        LOOP AT get_ddic_key_fields( iv_table_name ) INTO DATA(lv_create_key).
+          DATA(lv_create_field) = CONV fieldname( lv_create_key ).
+          IF zcl_dyn_record_handler=>is_generated_technical_key(
+               iv_table_name = iv_table_name
+               iv_fieldname  = lv_create_field ) = abap_false.
+            CONTINUE.
+          ENDIF.
+
+          READ TABLE ls_row-cells ASSIGNING FIELD-SYMBOL(<generated_cell>)
+            WITH KEY fieldname = lv_create_field.
+          IF sy-subrc <> 0.
+            APPEND VALUE #( fieldname = lv_create_field ) TO ls_row-cells.
+            READ TABLE ls_row-cells ASSIGNING <generated_cell>
+              WITH KEY fieldname = lv_create_field.
+          ENDIF.
+          IF <generated_cell>-value IS NOT INITIAL.
+            CONTINUE.
+          ENDIF.
+
+          SELECT SINGLE inttype, leng
+            FROM dd03l
+            WHERE tabname   = @iv_table_name
+              AND fieldname = @lv_create_field
+              AND as4local  = 'A'
+            INTO @DATA(ls_create_dd03l).
+          IF sy-subrc <> 0.
+            CONTINUE.
+          ENDIF.
+          TRY.
+              IF ls_create_dd03l-inttype = 'X' AND ls_create_dd03l-leng = 16.
+                <generated_cell>-value = |{ cl_system_uuid=>create_uuid_x16_static( ) }|.
+              ELSE.
+                <generated_cell>-value = cl_system_uuid=>create_uuid_c32_static( ).
+              ENDIF.
+            CATCH cx_uuid_error INTO DATA(lx_create_uuid).
+              APPEND VALUE #( row_no = ls_row-row_no table_name = iv_table_name
+                              status = c_status-error
+                              fieldname = lv_create_field
+                              message = |Cannot generate { lv_create_key }: { lx_create_uuid->get_text( ) }| ) TO rt_diff.
+              CLEAR <generated_cell>-value.
+              CONTINUE.
+            ENDTRY.
+        ENDLOOP.
+      ENDIF.
+
       IF lv_requested_action = 'C'
          AND lv_eid_f IS NOT INITIAL
          AND is_fk_key_field(
@@ -1782,7 +1796,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
             CATCH cx_uuid_error INTO DATA(lx_uuid).
               APPEND VALUE #( row_no = ls_row-row_no table_name = iv_table_name
                               status = c_status-error
-                              message = |Cannot generate ENTITY_ID: { lx_uuid->get_text( ) }| ) TO rt_diff.
+                              message = |Cannot generate { lv_eid_f }: { lx_uuid->get_text( ) }| ) TO rt_diff.
               CONTINUE.
           ENDTRY.
         ELSEIF <eid_cell>-value IS INITIAL.
@@ -1798,6 +1812,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       DATA(lv_key_problem) = get_key_problem(
         iv_table_name      = iv_table_name
         iv_entity_id_field = lv_eid_f
+        iv_action          = lv_requested_action
         it_biz_keys        = lt_biz_keys
         it_cells           = ls_row-cells ).
 
@@ -1881,7 +1896,7 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
                 CATCH cx_uuid_error INTO DATA(lx_deferred_uuid).
                   APPEND VALUE #( row_no = ls_row-row_no table_name = iv_table_name
                                   record_key = lv_fkey status = c_status-error
-                                  message = |Cannot generate ENTITY_ID: { lx_deferred_uuid->get_text( ) }| ) TO rt_diff.
+                                  message = |Cannot generate { lv_eid_f }: { lx_deferred_uuid->get_text( ) }| ) TO rt_diff.
                   CONTINUE.
               ENDTRY.
               lv_fkey = build_file_key(
@@ -1972,6 +1987,56 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_key_problem.
+    DATA lt_identity_keys TYPE string_table.
+    DATA lt_missing_identity TYPE string_table.
+    DATA lt_empty_identity TYPE string_table.
+    lt_identity_keys = get_ddic_key_fields( iv_table_name ).
+
+    LOOP AT lt_identity_keys INTO DATA(lv_identity_key).
+      READ TABLE it_cells TRANSPORTING NO FIELDS
+        WITH KEY fieldname = CONV fieldname( lv_identity_key ).
+      IF sy-subrc <> 0.
+        APPEND lv_identity_key TO lt_missing_identity.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_identity_value) = get_cell_value(
+        it_cells = it_cells
+        iv_field = CONV fieldname( lv_identity_key ) ).
+      IF lv_identity_value IS INITIAL.
+        IF iv_action = 'C'
+           AND zcl_dyn_record_handler=>is_generated_technical_key(
+                 iv_table_name = iv_table_name
+                 iv_fieldname  = CONV fieldname( lv_identity_key ) ) = abap_true.
+          CONTINUE.
+        ENDIF.
+        APPEND lv_identity_key TO lt_empty_identity.
+        CONTINUE.
+      ENDIF.
+
+      IF zcl_dyn_record_handler=>is_uuid_key_field(
+           iv_table_name = iv_table_name
+           iv_fieldname  = CONV fieldname( lv_identity_key ) ) = abap_true
+         AND is_valid_uuid_hex( lv_identity_value ) = abap_false.
+        rv_message = |Invalid key { lv_identity_key } value '{ lv_identity_value }'.|.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_missing_identity IS NOT INITIAL.
+      DATA(lv_missing_identity) = concat_lines_of(
+        table = lt_missing_identity sep = ', ' ).
+      rv_message = |Uploaded file is missing DDIC key column(s): { lv_missing_identity }.|.
+      RETURN.
+    ENDIF.
+
+    IF lt_empty_identity IS NOT INITIAL.
+      DATA(lv_empty_identity) = concat_lines_of(
+        table = lt_empty_identity sep = ', ' ).
+      rv_message = |Missing key value(s) for { lv_empty_identity }.|.
+      RETURN.
+    ENDIF.
+
     IF iv_entity_id_field IS NOT INITIAL.
       DATA(lv_eid) = get_cell_value(
         it_cells = it_cells
@@ -1981,7 +2046,6 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
           rv_message = |Invalid { iv_entity_id_field } value '{ lv_eid }'. Upload a downloaded { iv_table_name } file or leave the technical key blank for new rows.|.
           RETURN.
         ENDIF.
-        RETURN.
       ENDIF.
 
       IF is_fk_key_field(
@@ -2032,20 +2096,9 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD is_fk_key_field.
-    SELECT SINGLE @abap_true
-      FROM dd08l
-      INNER JOIN dd05s
-        ON  dd05s~tabname   = dd08l~tabname
-        AND dd05s~fieldname = dd08l~fieldname
-        AND dd05s~as4local  = dd08l~as4local
-      WHERE dd08l~tabname    = @iv_table_name
-        AND dd08l~as4local   = 'A'
-        AND dd05s~forkey     = @iv_field_name
-        AND dd08l~checktable IS NOT INITIAL
-      INTO @rv_is_fk.
-    IF sy-subrc <> 0.
-      rv_is_fk = abap_false.
-    ENDIF.
+    rv_is_fk = zcl_dyn_record_handler=>is_fk_key_field(
+      iv_table_name = iv_table_name
+      iv_fieldname  = iv_field_name ).
   ENDMETHOD.
 
   METHOD is_valid_uuid_hex.
@@ -2159,7 +2212,13 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD validate_row.
+    DATA(lt_ddic_keys) = get_ddic_key_fields( iv_table_name ).
+
     LOOP AT it_fields INTO DATA(ls_field).
+      IF ls_field-field_name = 'MANDT' OR ls_field-field_name = 'CLIENT'.
+        CONTINUE.
+      ENDIF.
+
       IF is_diff_comparable_field(
            is_field      = ls_field
            iv_table_name = iv_table_name
@@ -2174,14 +2233,20 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      IF iv_action = 'D'
-         AND is_config_flag( ls_field-is_key_field ) = abap_false
-         AND ls_field-field_name <> get_entity_id_field( iv_table_name ).
-        CONTINUE.
+      IF iv_action = 'D'.
+        READ TABLE lt_ddic_keys TRANSPORTING NO FIELDS
+          WITH KEY table_line = CONV string( ls_field-field_name ).
+        IF sy-subrc <> 0.
+          CONTINUE.
+        ENDIF.
       ENDIF.
 
       IF ( ls_field-mandatory_flag = abap_true OR ls_field-mandatory_flag = 'X' )
-         AND lv_val IS INITIAL.
+         AND lv_val IS INITIAL
+         AND NOT ( iv_action = 'C'
+                   AND zcl_dyn_record_handler=>is_generated_technical_key(
+                         iv_table_name = iv_table_name
+                         iv_fieldname  = ls_field-field_name ) = abap_true ).
         APPEND VALUE #( fieldname = ls_field-field_name
                         message = |Field { ls_field-field_name } is required.| ) TO rt_errors.
         CONTINUE.
@@ -2239,66 +2304,34 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
         ENDIF.
       ENDIF.
 
-      DATA lv_fk_table TYPE tabname.
-      DATA lv_fk_field TYPE fieldname.
-      CLEAR: lv_fk_table, lv_fk_field.
+      DATA(ls_fk_info) = zcl_dyn_record_handler=>get_domain_check_info(
+        iv_table_name = iv_table_name
+        iv_fieldname  = ls_field-field_name ).
 
-      SELECT SINGLE dd08l~checktable, dd05s~fieldname
-        FROM dd08l
-        INNER JOIN dd05s
-          ON  dd05s~tabname   = dd08l~tabname
-          AND dd05s~fieldname = dd08l~fieldname
-          AND dd05s~as4local  = dd08l~as4local
-        WHERE dd08l~tabname    = @iv_table_name
-          AND dd08l~as4local   = 'A'
-          AND dd08l~checktable IS NOT INITIAL
-          AND dd05s~forkey     = @ls_field-field_name
-        INTO (@lv_fk_table, @lv_fk_field).
-
-      IF sy-subrc <> 0 AND ls_field-domain_name IS NOT INITIAL.
-        SELECT SINGLE entitytab
-          FROM dd01l
-          WHERE domname  = @ls_field-domain_name
-            AND as4local = 'A'
-            AND entitytab IS NOT INITIAL
-          INTO @lv_fk_table.
-
-        IF sy-subrc = 0 AND lv_fk_table IS NOT INITIAL.
-          SELECT SINGLE dd03l~fieldname
-            FROM dd03l
-            INNER JOIN dd04l
-              ON  dd04l~rollname = dd03l~rollname
-              AND dd04l~as4local = dd03l~as4local
-            WHERE dd03l~tabname   = @lv_fk_table
-              AND dd03l~keyflag   = 'X'
-              AND dd03l~as4local  = 'A'
-              AND dd03l~fieldname <> 'MANDT'
-              AND dd04l~domname   = @ls_field-domain_name
-            INTO @lv_fk_field.
-
-          IF sy-subrc <> 0.
-            SELECT SINGLE fieldname
-              FROM dd03l
-              WHERE tabname   = @lv_fk_table
-                AND keyflag   = 'X'
-                AND as4local  = 'A'
-                AND fieldname <> 'MANDT'
-              INTO @lv_fk_field.
-          ENDIF.
-        ENDIF.
-      ENDIF.
-
-      IF sy-subrc = 0 AND lv_fk_table IS NOT INITIAL AND lv_fk_field IS NOT INITIAL.
+      IF ls_fk_info-checktable IS NOT INITIAL AND ls_fk_info-checkfield IS NOT INITIAL.
         DATA(lv_fk_value) = lv_val.
         DATA(lv_check_msg_field) = CONV string( ls_field-field_name ).
+        DATA lv_fk_is_raw TYPE abap_bool.
+        CLEAR lv_fk_is_raw.
         SELECT SINGLE leng, inttype
           FROM dd03l
-          WHERE tabname   = @lv_fk_table
-            AND fieldname = @lv_fk_field
+          WHERE tabname   = @ls_fk_info-checktable
+            AND fieldname = @ls_fk_info-checkfield
             AND as4local  = 'A'
           INTO @DATA(ls_fk_dd03l).
         IF sy-subrc = 0.
-          IF ls_fk_dd03l-leng > 0 AND strlen( lv_fk_value ) > ls_fk_dd03l-leng.
+          IF ls_fk_dd03l-inttype = 'X'.
+            DATA(lv_expected_hex_len) = ls_fk_dd03l-leng * 2.
+            CONDENSE lv_fk_value NO-GAPS.
+            TRANSLATE lv_fk_value TO UPPER CASE.
+            IF strlen( lv_fk_value ) <> lv_expected_hex_len
+               OR lv_fk_value CN '0123456789ABCDEF'.
+              APPEND VALUE #( fieldname = ls_field-field_name
+                              message = |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| ) TO rt_errors.
+              CONTINUE.
+            ENDIF.
+            lv_fk_is_raw = abap_true.
+          ELSEIF ls_fk_dd03l-leng > 0 AND strlen( lv_fk_value ) > ls_fk_dd03l-leng.
             APPEND VALUE #( fieldname = ls_field-field_name
                             message = |{ lv_check_msg_field } '{ lv_val }' is invalid. Please select an existing { lv_check_msg_field }.| ) TO rt_errors.
             CONTINUE.
@@ -2310,14 +2343,38 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
             CONTINUE.
           ENDIF.
         ENDIF.
-        REPLACE ALL OCCURRENCES OF |'| IN lv_fk_value WITH |''|.
-        DATA(lv_fk_where) = |{ lv_fk_field } = '{ lv_fk_value }'|.
         DATA(lv_fk_exists) = abap_false.
         TRY.
-            SELECT SINGLE @abap_true
-              FROM (lv_fk_table)
-              WHERE (lv_fk_where)
-              INTO @lv_fk_exists.
+            IF lv_fk_is_raw = abap_true.
+              DATA(lr_parent_data) = zcl_dyn_record_handler=>get_table_data(
+                iv_table_name = ls_fk_info-checktable
+                iv_max_rows   = 1000 ).
+              ASSIGN lr_parent_data->* TO FIELD-SYMBOL(<lt_parent_data>).
+              IF <lt_parent_data> IS ASSIGNED.
+                LOOP AT <lt_parent_data> ASSIGNING FIELD-SYMBOL(<ls_parent_row>).
+                  ASSIGN COMPONENT ls_fk_info-checkfield OF STRUCTURE <ls_parent_row>
+                    TO FIELD-SYMBOL(<lv_parent_value>).
+                  IF sy-subrc <> 0 OR <lv_parent_value> IS INITIAL.
+                    CONTINUE.
+                  ENDIF.
+
+                  DATA(lv_parent_hex) = |{ <lv_parent_value> }|.
+                  CONDENSE lv_parent_hex NO-GAPS.
+                  TRANSLATE lv_parent_hex TO UPPER CASE.
+                  IF lv_parent_hex = lv_fk_value.
+                    lv_fk_exists = abap_true.
+                    EXIT.
+                  ENDIF.
+                ENDLOOP.
+              ENDIF.
+            ELSE.
+              REPLACE ALL OCCURRENCES OF |'| IN lv_fk_value WITH |''|.
+              DATA(lv_fk_where) = |{ ls_fk_info-checkfield } = '{ lv_fk_value }'|.
+              SELECT SINGLE @abap_true
+                FROM (ls_fk_info-checktable)
+                WHERE (lv_fk_where)
+                INTO @lv_fk_exists.
+            ENDIF.
           CATCH cx_root.
             CLEAR lv_fk_exists.
         ENDTRY.
@@ -2474,13 +2531,8 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    DATA lt_keys TYPE string_table.
-    lt_keys = get_match_key_fields(
-                it_fields     = lt_fields
-                iv_table_name = iv_table_name ).
-
-    DATA(lv_commit_eid_f) = get_entity_id_field( iv_table_name ).
-    IF lt_keys IS INITIAL AND lv_commit_eid_f IS INITIAL.
+    DATA(lt_keys) = get_ddic_key_fields( iv_table_name ).
+    IF lt_keys IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
         EXPORTING iv_text = |Table { iv_table_name } không có key field importable để commit|.
     ENDIF.
@@ -2572,11 +2624,6 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
                                  iv_record_key = ls_group-record_key
                                  it_fields     = lt_fields ).
 
-              DATA(lv_eid_where) = uses_entity_id_where(
-                iv_table_name = iv_table_name
-                it_fields     = lt_fields
-                iv_record_key = ls_group-record_key ).
-
               DATA lv_set TYPE string.
               DATA lt_seen_set TYPE string_table.
               CLEAR lv_set.
@@ -2586,12 +2633,10 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
                   CONTINUE.
                 ENDIF.
 
-                IF lv_eid_where = abap_false.
-                  READ TABLE lt_keys TRANSPORTING NO FIELDS
-                    WITH KEY table_line = CONV string( ls_cell_chg-fieldname ).
-                  IF sy-subrc = 0.
-                    CONTINUE.
-                  ENDIF.
+                READ TABLE lt_keys TRANSPORTING NO FIELDS
+                  WITH KEY table_line = CONV string( ls_cell_chg-fieldname ).
+                IF sy-subrc = 0.
+                  CONTINUE.
                 ENDIF.
 
                 READ TABLE lt_fields INTO DATA(ls_f_upd) WITH KEY field_name = ls_cell_chg-fieldname.
@@ -3889,8 +3934,22 @@ lv_commit_records }|.
   ENDMETHOD.
 
   METHOD get_input_guidance.
-    IF is_field-field_name = get_entity_id_field( iv_table_name ).
+    IF is_field-field_name = 'MANDT' OR is_field-field_name = 'CLIENT'.
+      rv_text = 'System-managed client field. Leave blank.'.
+      RETURN.
+    ENDIF.
+
+    IF zcl_dyn_record_handler=>is_generated_technical_key(
+         iv_table_name = iv_table_name
+         iv_fieldname  = is_field-field_name ) = abap_true.
       rv_text = 'Technical key. Leave blank for Create; required for Update/Delete.'.
+      RETURN.
+    ENDIF.
+
+    IF is_fk_key_field(
+         iv_table_name = iv_table_name
+         iv_field_name = is_field-field_name ) = abap_true.
+      rv_text = 'Required referenced key. Select an existing value.'.
       RETURN.
     ENDIF.
 
@@ -4222,70 +4281,23 @@ lv_commit_records }|.
       RETURN.
     ENDIF.
 
-    DATA lv_check_table TYPE tabname.
-    DATA lv_check_field TYPE fieldname.
+    DATA(ls_check_info) = zcl_dyn_record_handler=>get_domain_check_info(
+      iv_table_name = iv_table_name
+      iv_fieldname  = is_export_col-field_name ).
 
-    SELECT SINGLE dd08l~checktable
-      FROM dd08l
-      INNER JOIN dd05s
-        ON  dd05s~tabname   = dd08l~tabname
-        AND dd05s~fieldname = dd08l~fieldname
-        AND dd05s~as4local  = dd08l~as4local
-      WHERE dd08l~tabname    = @iv_table_name
-        AND dd08l~as4local   = 'A'
-        AND dd05s~forkey     = @is_export_col-field_name
-        AND dd08l~checktable IS NOT INITIAL
-      INTO @lv_check_table.
-
-    IF sy-subrc <> 0 OR lv_check_table IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    SELECT SINGLE dd05s~forstring
-      FROM dd05s
-      INNER JOIN dd08l
-        ON  dd08l~tabname   = dd05s~tabname
-        AND dd08l~fieldname = dd05s~fieldname
-        AND dd08l~as4local  = dd05s~as4local
-      WHERE dd05s~tabname   = @iv_table_name
-        AND dd05s~as4local  = 'A'
-        AND dd05s~forkey    = @is_export_col-field_name
-      INTO @lv_check_field.
-
-    IF lv_check_field IS NOT INITIAL.
-      SELECT SINGLE @abap_true
-        FROM dd03l
-        WHERE tabname   = @lv_check_table
-          AND fieldname = @lv_check_field
-          AND as4local  = 'A'
-        INTO @DATA(lv_check_field_exists).
-    ENDIF.
-
-    IF lv_check_field IS INITIAL OR lv_check_field_exists = abap_false.
-      CLEAR lv_check_field.
-      DATA(lt_parent_keys) = zcl_dyn_record_handler=>get_key_fields(
-        iv_table_name = lv_check_table ).
-      LOOP AT lt_parent_keys INTO DATA(lv_parent_key).
-        IF lv_parent_key = 'MANDT' OR lv_parent_key = 'CLIENT'.
-          CONTINUE.
-        ENDIF.
-        lv_check_field = CONV fieldname( lv_parent_key ).
-        EXIT.
-      ENDLOOP.
-    ENDIF.
-
-    IF lv_check_field IS INITIAL.
+    IF ls_check_info-checktable IS INITIAL
+       OR ls_check_info-checkfield IS INITIAL.
       RETURN.
     ENDIF.
 
     TRY.
         DATA(lr_check_data) = zcl_dyn_record_handler=>get_table_data(
-          iv_table_name = lv_check_table
+          iv_table_name = ls_check_info-checktable
           iv_max_rows   = 1000 ).
         ASSIGN lr_check_data->* TO FIELD-SYMBOL(<lt_check_data>).
 
         LOOP AT <lt_check_data> ASSIGNING FIELD-SYMBOL(<ls_check_row>).
-          ASSIGN COMPONENT lv_check_field OF STRUCTURE <ls_check_row>
+          ASSIGN COMPONENT ls_check_info-checkfield OF STRUCTURE <ls_check_row>
             TO FIELD-SYMBOL(<lv_check_value>).
           IF sy-subrc <> 0 OR <lv_check_value> IS INITIAL.
             CONTINUE.
@@ -4510,4 +4522,5 @@ lv_commit_records }|.
   ENDMETHOD.
 
 ENDCLASS.
+
 

@@ -15,12 +15,20 @@ define view entity ZI_FLD_CONFIG
       config_uuid    as ConfigUuid,
       field_type     as FieldType,
       domain_name    as DomainName,
-      mandatory_flag as MandatoryFlag,
-      display_order  as DisplayOrder,
-      label_text     as LabelText,
-      is_key_field   as IsKeyField,
-      readonly_flag  as ReadonlyFlag,
-      hidden_flag    as HiddenFlag,
+      @Semantics.booleanIndicator: true
+        mandatory_flag as MandatoryFlag,
+        
+        display_order  as DisplayOrder,
+        label_text     as LabelText,
+        
+        @Semantics.booleanIndicator: true
+        is_key_field as IsKeyField,
+        
+        @Semantics.booleanIndicator: true
+        readonly_flag as ReadonlyFlag,
+        
+        @Semantics.booleanIndicator: true
+        hidden_flag as HiddenFlag,
 
       _TblConfig
 }
