@@ -76,6 +76,21 @@ TYPES:
         RETURNING
           VALUE(rt_key_fields) TYPE tt_string_table,
 
+      is_uuid_key_field
+        IMPORTING iv_table_name TYPE tabname
+                  iv_fieldname  TYPE fieldname
+        RETURNING VALUE(rv_is_uuid) TYPE abap_bool,
+
+      is_generated_technical_key
+        IMPORTING iv_table_name TYPE tabname
+                  iv_fieldname  TYPE fieldname
+        RETURNING VALUE(rv_is_generated) TYPE abap_bool,
+
+      is_fk_key_field
+        IMPORTING iv_table_name TYPE tabname
+                  iv_fieldname  TYPE fieldname
+        RETURNING VALUE(rv_is_fk) TYPE abap_bool,
+
       check_foreign_key
         IMPORTING
           iv_table_name        TYPE tabname
@@ -150,6 +165,18 @@ CLASS-METHODS on_create
         iv_table_name TYPE tabname
         ir_record     TYPE REF TO data
       RETURNING VALUE(rv_message) TYPE string.
+
+    TYPES:
+      BEGIN OF ty_check_info,
+        checktable TYPE tabname,
+        checkfield TYPE fieldname,
+        has_fixed  TYPE abap_bool,
+      END OF ty_check_info.
+
+    CLASS-METHODS get_domain_check_info
+      IMPORTING iv_table_name TYPE tabname
+                iv_fieldname  TYPE fieldname
+      RETURNING VALUE(rs_info) TYPE ty_check_info.
 PRIVATE SECTION.
 CLASS-METHODS serialize_struct
       IMPORTING ia_struct      TYPE any
@@ -201,26 +228,6 @@ CLASS-METHODS fill_date_field
       IMPORTING iv_fieldname  TYPE fieldname
                 ir_new_record TYPE REF TO data
                 ir_old_record TYPE REF TO data.
-
-    " Kiểm tra field có phải FK key tham chiếu bảng cha không.
-    " Dùng JOIN DD08L + DD05S (active) thay vì DD05Q (view không có keyflag/reftabname).
-    " Nếu đúng -> FE phải chọn từ bảng cha, BE không tự gen UUID.
-    CLASS-METHODS is_fk_key_field
-      IMPORTING iv_table_name   TYPE tabname
-                iv_fieldname    TYPE fieldname
-      RETURNING VALUE(rv_is_fk) TYPE abap_bool.
-
-    TYPES:
-      BEGIN OF ty_check_info,
-        checktable TYPE tabname,
-        checkfield TYPE fieldname,
-        has_fixed  TYPE abap_bool,
-      END OF ty_check_info.
-
-    CLASS-METHODS get_domain_check_info
-      IMPORTING iv_table_name TYPE tabname
-                iv_fieldname  TYPE fieldname
-      RETURNING VALUE(rs_info) TYPE ty_check_info.
 
     CLASS-METHODS check_fixed_value
       IMPORTING iv_table_name TYPE tabname
@@ -706,108 +713,6 @@ ENDMETHOD.
       ENDTRY.
     ENDLOOP.
 
-    DATA(lt_parent_key_fields) = zcl_dyn_record_handler=>get_key_fields( iv_table_name ).
-
-    LOOP AT lt_parent_key_fields INTO DATA(lv_parent_key_field).
-      IF lv_parent_key_field = 'MANDT' OR lv_parent_key_field = 'CLIENT'.
-        CONTINUE.
-      ENDIF.
-
-      IF lv_parent_key_field <> 'ENTITY_ID'.
-        CONTINUE.
-      ENDIF.
-
-      IF zcl_dyn_record_handler=>is_fk_key_field(
-           iv_table_name = iv_table_name
-           iv_fieldname  = CONV fieldname( lv_parent_key_field ) ) = abap_true.
-        CONTINUE.
-      ENDIF.
-
-      ASSIGN COMPONENT lv_parent_key_field OF STRUCTURE <ls_record>
-        TO FIELD-SYMBOL(<lv_parent_key_value>).
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
-      IF <lv_parent_key_value> IS INITIAL.
-        CONTINUE.
-      ENDIF.
-
-      DATA(lv_parent_key_text) = |{ <lv_parent_key_value> }|.
-      CONDENSE lv_parent_key_text NO-GAPS.
-      TRANSLATE lv_parent_key_text TO UPPER CASE.
-
-      IF strlen( lv_parent_key_text ) <> 32.
-        CONTINUE.
-      ENDIF.
-
-      FIND REGEX '^[0-9A-F]{32}$' IN lv_parent_key_text.
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
-
-      DATA lt_candidate_tables TYPE STANDARD TABLE OF tabname WITH DEFAULT KEY.
-      CLEAR lt_candidate_tables.
-
-      SELECT table_name
-        FROM ztbl_config
-        WHERE table_name <> @iv_table_name
-        INTO TABLE @lt_candidate_tables.
-
-      LOOP AT lt_candidate_tables INTO DATA(lv_candidate_table).
-        TRY.
-            DATA(lo_candidate_struct) = CAST cl_abap_structdescr(
-              cl_abap_typedescr=>describe_by_name( lv_candidate_table ) ).
-            DATA(lo_candidate_table) = cl_abap_tabledescr=>create(
-              p_line_type = lo_candidate_struct ).
-
-            DATA lr_candidate_data TYPE REF TO data.
-            FIELD-SYMBOLS <lt_candidate_rows> TYPE STANDARD TABLE.
-            CREATE DATA lr_candidate_data TYPE HANDLE lo_candidate_table.
-            ASSIGN lr_candidate_data->* TO <lt_candidate_rows>.
-            IF <lt_candidate_rows> IS NOT ASSIGNED.
-              CONTINUE.
-            ENDIF.
-
-            SELECT *
-              FROM (lv_candidate_table)
-              INTO TABLE @<lt_candidate_rows>.
-
-            LOOP AT <lt_candidate_rows> ASSIGNING FIELD-SYMBOL(<ls_candidate_row>).
-              LOOP AT lo_candidate_struct->get_components( ) INTO DATA(ls_candidate_field).
-                IF ls_candidate_field-name = 'MANDT'
-                   OR ls_candidate_field-name = 'CLIENT'.
-                  CONTINUE.
-                ENDIF.
-
-                ASSIGN COMPONENT ls_candidate_field-name OF STRUCTURE <ls_candidate_row>
-                  TO FIELD-SYMBOL(<lv_candidate_value>).
-                IF sy-subrc <> 0.
-                  CONTINUE.
-                ENDIF.
-                IF <lv_candidate_value> IS INITIAL.
-                  CONTINUE.
-                ENDIF.
-
-                DATA(lv_candidate_text) = |{ <lv_candidate_value> }|.
-                CONDENSE lv_candidate_text NO-GAPS.
-                TRANSLATE lv_candidate_text TO UPPER CASE.
-
-                IF lv_candidate_text = lv_parent_key_text.
-                  rv_error = |Cannot delete: record is referenced by table { lv_candidate_table }|.
-                  RETURN.
-                ENDIF.
-
-                UNASSIGN <lv_candidate_value>.
-              ENDLOOP.
-            ENDLOOP.
-
-          CATCH cx_root.
-            CONTINUE.
-        ENDTRY.
-      ENDLOOP.
-
-      UNASSIGN <lv_parent_key_value>.
-    ENDLOOP.
   ENDMETHOD.
 METHOD serialize.
     TRY.
@@ -1388,6 +1293,71 @@ ENDMETHOD.
     IF sy-subrc = 0. TRY. <lv_mandt> = sy-mandt. CATCH cx_root. ENDTRY. ENDIF.
   ENDMETHOD.
 
+  METHOD is_uuid_key_field.
+    DATA lv_is_uuid TYPE abap_bool.
+    CLEAR lv_is_uuid.
+
+    READ TABLE get_key_fields( iv_table_name ) TRANSPORTING NO FIELDS
+      WITH KEY table_line = CONV string( iv_fieldname ).
+    IF sy-subrc <> 0.
+      rv_is_uuid = abap_false.
+      RETURN.
+    ENDIF.
+
+    SELECT SINGLE inttype, leng, rollname, domname
+      FROM dd03l
+      WHERE tabname   = @iv_table_name
+        AND fieldname = @iv_fieldname
+        AND as4local  = 'A'
+      INTO @DATA(ls_dd03l).
+    IF sy-subrc <> 0.
+      rv_is_uuid = abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_rollname) = CONV string( ls_dd03l-rollname ).
+    DATA(lv_domname)  = CONV string( ls_dd03l-domname ).
+    TRANSLATE lv_rollname TO UPPER CASE.
+    TRANSLATE lv_domname  TO UPPER CASE.
+
+    IF ls_dd03l-inttype = 'X' AND ls_dd03l-leng = 16.
+      lv_is_uuid = abap_true.
+    ELSEIF ls_dd03l-inttype = 'C' AND ls_dd03l-leng = 32
+       AND ( lv_rollname CS 'UUID' OR lv_domname CS 'UUID' ).
+      lv_is_uuid = abap_true.
+    ENDIF.
+
+    rv_is_uuid = lv_is_uuid.
+  ENDMETHOD.
+
+  METHOD is_generated_technical_key.
+    DATA(lv_fieldname) = CONV fieldname( iv_fieldname ).
+    TRANSLATE lv_fieldname TO UPPER CASE.
+
+    IF lv_fieldname = 'MANDT' OR lv_fieldname = 'CLIENT'.
+      rv_is_generated = abap_false.
+      RETURN.
+    ENDIF.
+
+    READ TABLE get_key_fields( iv_table_name ) TRANSPORTING NO FIELDS
+      WITH KEY table_line = CONV string( lv_fieldname ).
+    IF sy-subrc <> 0 OR is_uuid_key_field(
+         iv_table_name = iv_table_name
+         iv_fieldname  = lv_fieldname ) = abap_false.
+      rv_is_generated = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF is_fk_key_field(
+         iv_table_name = iv_table_name
+         iv_fieldname  = lv_fieldname ) = abap_true.
+      rv_is_generated = abap_false.
+      RETURN.
+    ENDIF.
+
+    rv_is_generated = abap_true.
+  ENDMETHOD.
+
   METHOD fill_uuid_keys.
     " Gen UUID chỉ khi: UUID type + không phải FK key (JOIN DD08L+DD05S)
     " FK key (vd ENTITY_ID -> ZTPC_HEADER): FE phải chọn, BE giữ nguyên
@@ -1409,7 +1379,13 @@ ENDMETHOD.
       " Bỏ qua nếu field không tồn tại hoặc đã có giá trị (FE đã cung cấp)
       IF sy-subrc <> 0 OR <lv_key_value> IS NOT INITIAL. CONTINUE. ENDIF.
 
-      SELECT SINGLE inttype, leng, rollname, domname
+      IF is_generated_technical_key(
+           iv_table_name = iv_table_name
+           iv_fieldname  = lv_fieldname ) = abap_false.
+        CONTINUE.
+      ENDIF.
+
+      SELECT SINGLE inttype, leng
         FROM dd03l
         WHERE tabname   = @iv_table_name
           AND fieldname = @lv_fieldname
@@ -1418,27 +1394,7 @@ ENDMETHOD.
 
       IF sy-subrc <> 0. CONTINUE. ENDIF.
 
-      DATA(lv_rollname) = CONV string( ls_dd03l-rollname ).
-      DATA(lv_domname)  = CONV string( ls_dd03l-domname ).
-      TRANSLATE lv_rollname TO UPPER CASE.
-      TRANSLATE lv_domname  TO UPPER CASE.
-
-      DATA(lv_is_uuid_type) = abap_false.
-      IF ls_dd03l-inttype = 'X' AND ls_dd03l-leng = 16.
-        lv_is_uuid_type = abap_true.
-      ELSEIF ls_dd03l-inttype = 'C' AND ls_dd03l-leng = 32
-         AND ( lv_rollname CS 'UUID' OR lv_domname CS 'UUID'
-            OR lv_rollname CS 'SYSUUID' OR lv_domname CS 'SYSUUID' ).
-        lv_is_uuid_type = abap_true.
-      ENDIF.
-
-      IF lv_is_uuid_type = abap_false. CONTINUE. ENDIF.
-
-      " FK guard: nếu field là FK key tham chiếu bảng cha -> FE cung cấp, không gen
-      IF is_fk_key_field( iv_table_name = iv_table_name
-                          iv_fieldname  = lv_fieldname ) = abap_true.
-        CONTINUE.
-      ENDIF.
+      " UUID/FK role was resolved above; only the concrete storage type is needed here.
 
       TRY.
           IF ls_dd03l-inttype = 'X' AND ls_dd03l-leng = 16.
@@ -2048,3 +2004,4 @@ METHOD compare_etag.
     ENDTRY.
   ENDMETHOD.
 ENDCLASS.
+
