@@ -45,7 +45,7 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
   METHOD lock.
   ENDMETHOD.
 
-  METHOD downloadExcel.
+    METHOD downloadExcel.
 
     LOOP AT keys INTO DATA(ls_key).
       DATA(ls_param) = ls_key-%param.
@@ -70,7 +70,7 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD uploadExcel.
+    METHOD uploadExcel.
 
     LOOP AT keys INTO DATA(ls_key).
       DATA(ls_param) = ls_key-%param.
@@ -84,16 +84,30 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
             IMPORTING et_diff = lt_diff
                       ev_info = lv_info ).
         CATCH zcx_excel_pipeline INTO DATA(lx).
+          DATA(lv_uuid_err) = VALUE sysuuid_x16( ).
+          TRY.
+              lv_uuid_err = cl_system_uuid=>create_uuid_x16_static( ).
+            CATCH cx_uuid_error.
+              CLEAR lv_uuid_err.
+          ENDTRY.
+
           APPEND VALUE #(
-            id      = cl_system_uuid=>create_uuid_x16_static( )
+            id      = lv_uuid_err
             row_no  = 0
             status  = 'ERROR'
             message = lx->get_text( ) ) TO lt_diff.
       ENDTRY.
 
       IF lv_info IS NOT INITIAL.
+        DATA(lv_uuid_info) = VALUE sysuuid_x16( ).
+        TRY.
+            lv_uuid_info = cl_system_uuid=>create_uuid_x16_static( ).
+          CATCH cx_uuid_error.
+            CLEAR lv_uuid_info.
+        ENDTRY.
+
         INSERT VALUE #(
-          id      = cl_system_uuid=>create_uuid_x16_static( )
+          id      = lv_uuid_info
           row_no  = 0
           status  = 'INFO'
           message = lv_info ) INTO lt_diff INDEX 1.
@@ -131,6 +145,7 @@ CLASS lhc_ExcelPipeline IMPLEMENTATION.
     ENDLOOP.
 
   ENDMETHOD.
+
 
 ENDCLASS.
 

@@ -2385,39 +2385,6 @@ CLASS zcl_excel_pipeline IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    TYPES: BEGIN OF ty_date_pair,
-             from_field TYPE fieldname,
-             to_field   TYPE fieldname,
-           END OF ty_date_pair,
-           ty_date_pairs TYPE STANDARD TABLE OF ty_date_pair WITH EMPTY KEY.
-    DATA(lt_date_pairs) = VALUE ty_date_pairs(
-      ( from_field = 'VALID_FROM' to_field = 'VALID_TO' )
-      ( from_field = 'START_DATE' to_field = 'END_DATE' ) ).
-    DATA lv_from_date TYPE string.
-    DATA lv_to_date   TYPE string.
-
-    LOOP AT lt_date_pairs INTO DATA(ls_date_pair).
-      lv_from_date = get_cell_value(
-        it_cells = it_cells
-        iv_field = ls_date_pair-from_field ).
-      lv_to_date = get_cell_value(
-        it_cells = it_cells
-        iv_field = ls_date_pair-to_field ).
-      IF lv_from_date IS INITIAL OR lv_to_date IS INITIAL.
-        CONTINUE.
-      ENDIF.
-
-      REPLACE ALL OCCURRENCES OF '-' IN lv_from_date WITH ''.
-      REPLACE ALL OCCURRENCES OF '-' IN lv_to_date WITH ''.
-      IF strlen( lv_from_date ) = 8
-         AND strlen( lv_to_date ) = 8
-         AND lv_from_date CO '0123456789'
-         AND lv_to_date CO '0123456789'
-         AND lv_to_date < lv_from_date.
-          APPEND VALUE #( fieldname = ls_date_pair-to_field
-                          message = |{ ls_date_pair-to_field } must be on or after { ls_date_pair-from_field }.| ) TO rt_errors.
-      ENDIF.
-    ENDLOOP.
   ENDMETHOD.
 
   METHOD apply_diff_import.
@@ -3629,7 +3596,7 @@ lv_commit_records }|.
     ENDCASE.
   ENDMETHOD.
 
-  METHOD parse_xlsx.
+    METHOD parse_xlsx.
     CLEAR: et_rows, et_messages.
 
     DATA lo_excel TYPE REF TO zcl_excel.
@@ -3650,8 +3617,18 @@ lv_commit_records }|.
           EXPORTING iv_text = 'Workbook must contain a DATA worksheet. DOMAIN_LOV is ignored; legacy fallback is allowed only for a single-sheet workbook.'.
       ENDIF.
     ENDIF.
-    DATA(lv_max_col) = CONV i( lo_ws->get_highest_column( ) ).
-    DATA(lv_max_row) = CONV i( lo_ws->get_highest_row( ) ).
+
+    DATA lv_max_col TYPE i.
+    DATA lv_max_row TYPE i.
+    TRY.
+        lv_max_col = CONV i( lo_ws->get_highest_column( ) ).
+        lv_max_row = CONV i( lo_ws->get_highest_row( ) ).
+      CATCH zcx_excel INTO DATA(lx_dim).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING
+            previous = lx_dim
+            iv_text  = |Cannot read worksheet dimensions: { lx_dim->get_text( ) }|.
+    ENDTRY.
 
     IF lv_max_col = 0 OR lv_max_row < 2.
       APPEND |Excel file has no data rows. Row 1 = Input Guidance, Row 2 = Header, Row 3+ = Data.| TO et_messages.
@@ -3740,7 +3717,13 @@ lv_commit_records }|.
 
       lv_col = 1.
       WHILE lv_col <= lv_max_col.
-        lv_alpha = zcl_excel_common=>convert_column2alpha( lv_col ).
+        TRY.
+            lv_alpha = zcl_excel_common=>convert_column2alpha( lv_col ).
+          CATCH zcx_excel.
+            lv_col = lv_col + 1.
+            CONTINUE.
+        ENDTRY.
+
         CLEAR lv_value.
         TRY.
             lo_ws->get_cell(
@@ -3761,7 +3744,12 @@ lv_commit_records }|.
                           value     = lv_str ) TO ls_parsed-cells.
         ELSE.
           IF lv_str IS NOT INITIAL.
-            DATA(lv_col_alpha) = zcl_excel_common=>convert_column2alpha( lv_col ).
+            DATA lv_col_alpha TYPE zexcel_cell_column_alpha.
+            TRY.
+                lv_col_alpha = zcl_excel_common=>convert_column2alpha( lv_col ).
+              CATCH zcx_excel.
+                CLEAR lv_col_alpha.
+            ENDTRY.
 
             READ TABLE lt_header_cols TRANSPORTING NO FIELDS
               WITH KEY table_line = lv_col.
@@ -3786,7 +3774,7 @@ lv_commit_records }|.
     APPEND |Parsed { lines( et_rows ) } data rows.| TO et_messages.
   ENDMETHOD.
 
-  METHOD map_columns.
+    METHOD map_columns.
     CLEAR: et_colmap, et_header_cols, et_messages.
 
     DATA lv_alpha TYPE zexcel_cell_column_alpha.
@@ -3795,7 +3783,13 @@ lv_commit_records }|.
 
     lv_col = 1.
     WHILE lv_col <= iv_max_col.
-      lv_alpha = zcl_excel_common=>convert_column2alpha( lv_col ).
+      TRY.
+          lv_alpha = zcl_excel_common=>convert_column2alpha( lv_col ).
+        CATCH zcx_excel.
+          lv_col = lv_col + 1.
+          CONTINUE.
+      ENDTRY.
+
       CLEAR lv_value.
       TRY.
           io_worksheet->get_cell(
@@ -4158,7 +4152,7 @@ lv_commit_records }|.
     ENDTRY.
   ENDMETHOD.
 
-  METHOD build_domain_lov_sheet.
+      METHOD build_domain_lov_sheet.
     CLEAR rt_ranges.
     DATA lv_lov_col TYPE i VALUE 1.
     DATA lv_lov_row TYPE i.
@@ -4173,18 +4167,32 @@ lv_commit_records }|.
         CONTINUE.
       ENDIF.
 
-      DATA(lv_lov_alpha) = zcl_excel_common=>convert_column2alpha( lv_lov_col ).
-      io_lov_ws->set_cell(
-        ip_column = lv_lov_alpha
-        ip_row    = 1
-        ip_value  = CONV string( ls_col-field_name ) ).
+      DATA lv_lov_alpha TYPE zexcel_cell_column_alpha.
+      TRY.
+          lv_lov_alpha = zcl_excel_common=>convert_column2alpha( lv_lov_col ).
+        CATCH zcx_excel.
+          CONTINUE.
+      ENDTRY.
+
+      TRY.
+          io_lov_ws->set_cell(
+            ip_column = lv_lov_alpha
+            ip_row    = 1
+            ip_value  = CONV string( ls_col-field_name ) ).
+        CATCH zcx_excel.
+          CONTINUE.
+      ENDTRY.
 
       lv_lov_row = 2.
       LOOP AT lt_vals INTO DATA(lv_lov_value).
-        io_lov_ws->set_cell(
-          ip_column = lv_lov_alpha
-          ip_row    = lv_lov_row
-          ip_value  = lv_lov_value ).
+        TRY.
+            io_lov_ws->set_cell(
+              ip_column = lv_lov_alpha
+              ip_row    = lv_lov_row
+              ip_value  = lv_lov_value ).
+          CATCH zcx_excel.
+            CONTINUE.
+        ENDTRY.
         lv_lov_row = lv_lov_row + 1.
       ENDLOOP.
 
@@ -4199,7 +4207,7 @@ lv_commit_records }|.
     ENDLOOP.
   ENDMETHOD.
 
-  METHOD apply_domain_validations.
+   METHOD apply_domain_validations.
     CONSTANTS c_max_data_row TYPE i VALUE 500.
     CONSTANTS c_max_inline   TYPE i VALUE 200.
 
@@ -4229,7 +4237,13 @@ lv_commit_records }|.
         CONTINUE.
       ENDIF.
 
-      DATA(lv_data_alpha) = zcl_excel_common=>convert_column2alpha( ls_rng-data_col ).
+      DATA lv_data_alpha TYPE zexcel_cell_column_alpha.
+      TRY.
+          lv_data_alpha = zcl_excel_common=>convert_column2alpha( ls_rng-data_col ).
+        CATCH zcx_excel.
+          CONTINUE.
+      ENDTRY.
+
       DATA(lv_formula) = |"{ lv_inline }"|.
 
       TRY.
@@ -4449,10 +4463,16 @@ lv_commit_records }|.
     ENDLOOP.
   ENDMETHOD.
 
-  METHOD new_diff_id.
-    rv_id = cl_system_uuid=>create_uuid_x16_static( ).
+    METHOD new_diff_id.
+    TRY.
+        rv_id = cl_system_uuid=>create_uuid_x16_static( ).
+      CATCH cx_uuid_error INTO DATA(lx_uuid).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING
+            previous = lx_uuid
+            iv_text  = |Cannot generate diff ID: { lx_uuid->get_text( ) }|.
+    ENDTRY.
   ENDMETHOD.
-
   METHOD parse_diff_json.
     IF iv_json IS INITIAL.
       RETURN.
@@ -4522,5 +4542,6 @@ lv_commit_records }|.
   ENDMETHOD.
 
 ENDCLASS.
+
 
 

@@ -1,12 +1,12 @@
 
 CLASS zcl_dyn_record_handler DEFINITION
 PUBLIC FINAL CREATE PUBLIC.
-PUBLIC SECTION.
-TYPES:
+  PUBLIC SECTION.
+    TYPES:
       BEGIN OF ty_result,
-        success     TYPE abap_bool,
-        message     TYPE string,
-        record_key  TYPE ztde_record_key,  "key JSON sau thao tác
+        success    TYPE abap_bool,
+        message    TYPE string,
+        record_key TYPE ztde_record_key,  "key JSON sau thao tác
       END OF ty_result.
 
     TYPES:
@@ -21,43 +21,43 @@ TYPES:
     "Đã bao gồm: deserialize, autofill, insert, audit log.
     CLASS-METHODS create_record
       IMPORTING
-        iv_table_name  TYPE tabname
-        iv_record_data TYPE string
+        iv_table_name      TYPE tabname
+        iv_record_data     TYPE string
         iv_parent_audit_id TYPE sysuuid_c32 OPTIONAL
       RETURNING
-        VALUE(rs_result) TYPE ty_result.
+        VALUE(rs_result)   TYPE ty_result.
 
     "UPDATE 1 record vào bảng động.
     "Đã bao gồm: deserialize, select old, optimistic lock, autofill, update, audit log.
     CLASS-METHODS update_record
       IMPORTING
-        iv_table_name  TYPE tabname
-        iv_record_data TYPE string
-        iv_etag_field  TYPE string OPTIONAL
-        iv_etag_value  TYPE string OPTIONAL
+        iv_table_name      TYPE tabname
+        iv_record_data     TYPE string
+        iv_etag_field      TYPE string OPTIONAL
+        iv_etag_value      TYPE string OPTIONAL
         iv_parent_audit_id TYPE sysuuid_c32 OPTIONAL
       RETURNING
-        VALUE(rs_result) TYPE ty_result.
+        VALUE(rs_result)   TYPE ty_result.
 
     "DELETE 1 record khỏi bảng động.
     "Đã bao gồm: foreign key check, select old, delete, audit log.
     CLASS-METHODS delete_record
       IMPORTING
-        iv_table_name TYPE tabname
-        iv_record_key TYPE ztde_record_key
+        iv_table_name      TYPE tabname
+        iv_record_key      TYPE ztde_record_key
         iv_parent_audit_id TYPE sysuuid_c32 OPTIONAL
       RETURNING
-        VALUE(rs_result) TYPE ty_result.
+        VALUE(rs_result)   TYPE ty_result.
 
-CLASS-METHODS get_struct_desc
-  IMPORTING
-    iv_table_name TYPE tabname
-  RETURNING
-    VALUE(ro_desc) TYPE REF TO cl_abap_structdescr
-  RAISING   cx_root.
+    CLASS-METHODS get_struct_desc
+      IMPORTING
+                iv_table_name  TYPE tabname
+      RETURNING
+                VALUE(ro_desc) TYPE REF TO cl_abap_structdescr
+      RAISING   cx_root.
 
-TYPES:
-      tt_string_table TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    TYPES:
+          tt_string_table TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
 
     CLASS-METHODS:
       get_table_data
@@ -77,35 +77,35 @@ TYPES:
           VALUE(rt_key_fields) TYPE tt_string_table,
 
       is_uuid_key_field
-        IMPORTING iv_table_name TYPE tabname
-                  iv_fieldname  TYPE fieldname
+        IMPORTING iv_table_name     TYPE tabname
+                  iv_fieldname      TYPE fieldname
         RETURNING VALUE(rv_is_uuid) TYPE abap_bool,
 
       is_generated_technical_key
-        IMPORTING iv_table_name TYPE tabname
-                  iv_fieldname  TYPE fieldname
+        IMPORTING iv_table_name          TYPE tabname
+                  iv_fieldname           TYPE fieldname
         RETURNING VALUE(rv_is_generated) TYPE abap_bool,
 
       is_fk_key_field
-        IMPORTING iv_table_name TYPE tabname
-                  iv_fieldname  TYPE fieldname
+        IMPORTING iv_table_name   TYPE tabname
+                  iv_fieldname    TYPE fieldname
         RETURNING VALUE(rv_is_fk) TYPE abap_bool,
 
       check_foreign_key
         IMPORTING
-          iv_table_name        TYPE tabname
-          iv_record_key        TYPE string
+          iv_table_name   TYPE tabname
+          iv_record_key   TYPE string
         RETURNING
-          VALUE(rv_error)      TYPE string.
+          VALUE(rv_error) TYPE string.
 
     CLASS-METHODS get_single_record
-      IMPORTING iv_table_name  TYPE tabname
+      IMPORTING iv_table_name TYPE tabname
                 iv_where      TYPE string
-      RETURNING VALUE(rr_row)  TYPE REF TO data
+      RETURNING VALUE(rr_row) TYPE REF TO data
       RAISING   zcx_excel_pipeline
                 cx_sy_dynamic_osql_error.
 
-CLASS-METHODS serialize
+    CLASS-METHODS serialize
       IMPORTING ia_data        TYPE any
       RETURNING VALUE(rv_json) TYPE string.
 
@@ -127,7 +127,7 @@ CLASS-METHODS serialize
       RAISING
         cx_root.
 
-CLASS-METHODS on_create
+    CLASS-METHODS on_create
       IMPORTING iv_table_name TYPE tabname
                 ir_record     TYPE REF TO data.
 
@@ -141,7 +141,7 @@ CLASS-METHODS on_create
     CLASS-METHODS apply_admin_on_update
       CHANGING cs_record TYPE any.
 
-"Tạo WHERE clause động từ danh sách key fields và 1 record
+    "Tạo WHERE clause động từ danh sách key fields và 1 record
     CLASS-METHODS build_where_clause
       IMPORTING it_key_fields   TYPE string_table
                 ir_record       TYPE REF TO data
@@ -156,15 +156,16 @@ CLASS-METHODS on_create
 
     CLASS-METHODS validate_domain_values
       IMPORTING
-        iv_table_name TYPE tabname
-        ir_record     TYPE REF TO data
-      RETURNING VALUE(rt_errors) TYPE tt_validation_errors.
+                iv_table_name    TYPE tabname
+                ir_record        TYPE REF TO data
+      RETURNING VALUE(rt_errors) TYPE tt_validation_errors
+      RAISING   zcx_excel_pipeline.
 
     CLASS-METHODS validate_record_values
-      IMPORTING
-        iv_table_name TYPE tabname
-        ir_record     TYPE REF TO data
-      RETURNING VALUE(rv_message) TYPE string.
+      IMPORTING iv_table_name     TYPE tabname
+                ir_record         TYPE REF TO data
+      RETURNING VALUE(rv_message) TYPE string
+      RAISING   zcx_excel_pipeline.
 
     TYPES:
       BEGIN OF ty_check_info,
@@ -174,11 +175,11 @@ CLASS-METHODS on_create
       END OF ty_check_info.
 
     CLASS-METHODS get_domain_check_info
-      IMPORTING iv_table_name TYPE tabname
-                iv_fieldname  TYPE fieldname
+      IMPORTING iv_table_name  TYPE tabname
+                iv_fieldname   TYPE fieldname
       RETURNING VALUE(rs_info) TYPE ty_check_info.
-PRIVATE SECTION.
-CLASS-METHODS serialize_struct
+  PRIVATE SECTION.
+    CLASS-METHODS serialize_struct
       IMPORTING ia_struct      TYPE any
       RETURNING VALUE(rv_json) TYPE string.
 
@@ -188,15 +189,15 @@ CLASS-METHODS serialize_struct
       CHANGING  ca_record    TYPE REF TO data.
 
     CLASS-METHODS extract_json_value
-      IMPORTING iv_json        TYPE string
-                iv_field_name  TYPE string
+      IMPORTING iv_json         TYPE string
+                iv_field_name   TYPE string
       RETURNING VALUE(rv_value) TYPE string.
 
     CLASS-METHODS split_json_array
       IMPORTING iv_json         TYPE string
       RETURNING VALUE(rt_items) TYPE string_table.
 
-CLASS-METHODS fill_client
+    CLASS-METHODS fill_client
       IMPORTING ir_record TYPE REF TO data.
 
     CLASS-METHODS fill_uuid_keys
@@ -213,7 +214,7 @@ CLASS-METHODS fill_client
                 ir_record    TYPE REF TO data
                 iv_timestamp TYPE timestampl
                 iv_force     TYPE abap_bool DEFAULT abap_false.
-CLASS-METHODS fill_date_field
+    CLASS-METHODS fill_date_field
       IMPORTING iv_fieldname TYPE fieldname
                 ir_record    TYPE REF TO data
                 iv_date      TYPE dats
@@ -230,17 +231,17 @@ CLASS-METHODS fill_date_field
                 ir_old_record TYPE REF TO data.
 
     CLASS-METHODS check_fixed_value
-      IMPORTING iv_table_name TYPE tabname
-                iv_fieldname  TYPE fieldname
-                iv_value      TYPE string
+      IMPORTING iv_table_name   TYPE tabname
+                iv_fieldname    TYPE fieldname
+                iv_value        TYPE string
       RETURNING VALUE(rv_valid) TYPE abap_bool.
 
     CLASS-METHODS build_validation_message
-      IMPORTING it_errors TYPE tt_validation_errors
+      IMPORTING it_errors     TYPE tt_validation_errors
       RETURNING VALUE(rv_msg) TYPE string.
 
 
-      CLASS-METHODS compare_etag
+    CLASS-METHODS compare_etag
       IMPORTING iv_db_value    TYPE any
                 iv_fe_value    TYPE string
       RETURNING VALUE(rv_same) TYPE abap_bool.
@@ -248,7 +249,7 @@ ENDCLASS.
 
 
 CLASS zcl_dyn_record_handler IMPLEMENTATION.
-METHOD create_record.
+  METHOD create_record.
     TRY.
         DATA(lo_desc) = get_struct_desc( iv_table_name ).
         DATA lo_record TYPE REF TO data.
@@ -312,7 +313,7 @@ METHOD create_record.
     ENDTRY.
   ENDMETHOD.
 
-METHOD update_record.
+  METHOD update_record.
     TRY.
         DATA(lo_desc) = get_struct_desc( iv_table_name ).
 
@@ -364,7 +365,7 @@ METHOD update_record.
         " FE đã nhận lúc load record ban đầu.
         DATA(lv_old_json) = zcl_dyn_record_handler=>serialize( <ls_old> ).
 
-      "── Optimistic lock ──
+        "── Optimistic lock ──
         IF iv_etag_field IS NOT INITIAL AND iv_etag_value IS NOT INITIAL.
           ASSIGN COMPONENT iv_etag_field OF STRUCTURE <ls_old>
             TO FIELD-SYMBOL(<lv_etag_db>).
@@ -497,11 +498,11 @@ METHOD update_record.
     ENDTRY.
   ENDMETHOD.
 
-METHOD get_struct_desc.
-  ro_desc = CAST cl_abap_structdescr(
-    cl_abap_typedescr=>describe_by_name( iv_table_name )
-  ).
-ENDMETHOD.
+  METHOD get_struct_desc.
+    ro_desc = CAST cl_abap_structdescr(
+      cl_abap_typedescr=>describe_by_name( iv_table_name )
+    ).
+  ENDMETHOD.
 
   METHOD get_table_data.
     " Tạo dynamic internal table từ table name
@@ -548,7 +549,7 @@ ENDMETHOD.
     ENDLOOP.
   ENDMETHOD.
 
- METHOD check_foreign_key.
+  METHOD check_foreign_key.
     TYPES: BEGIN OF ty_fk_compare,
              child_field  TYPE fieldname,
              parent_field TYPE fieldname,
@@ -714,7 +715,7 @@ ENDMETHOD.
     ENDLOOP.
 
   ENDMETHOD.
-METHOD serialize.
+  METHOD serialize.
     TRY.
         DATA(lo_desc) = cl_abap_typedescr=>describe_by_data( ia_data ).
 
@@ -785,7 +786,7 @@ METHOD serialize.
   ENDMETHOD.
 
 
-METHOD serialize_struct.
+  METHOD serialize_struct.
     " Bước 1: Serialize bình thường — /ui2/cl_json có thể encode RAW thành Base64
     TRY.
         rv_json = /ui2/cl_json=>serialize(
@@ -852,7 +853,7 @@ METHOD serialize_struct.
       CATCH cx_root.
         " Nếu fail post-process -> vẫn trả JSON gốc, không crash
     ENDTRY.
-ENDMETHOD.
+  ENDMETHOD.
   METHOD deserialize.
     ASSIGN ca_record->* TO FIELD-SYMBOL(<ls_record>).
 
@@ -866,7 +867,8 @@ ENDMETHOD.
             /ui2/cl_json=>deserialize( EXPORTING json = iv_json CHANGING data = <ls_record> ).
           CATCH cx_root INTO DATA(lx_plain).
             RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-              EXPORTING value = lx_plain->get_text( ).
+              EXPORTING
+                value = lx_plain->get_text( ).
         ENDTRY.
         RETURN.
     ENDTRY.
@@ -912,7 +914,8 @@ ENDMETHOD.
         ).
       CATCH cx_root INTO DATA(lx_deser).
         RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-          EXPORTING value = lx_deser->get_text( ).
+          EXPORTING
+            value = lx_deser->get_text( ).
     ENDTRY.
 
     " ── Bước 3: Assign RAW fields từ hex string đã lưu ──
@@ -950,7 +953,8 @@ ENDMETHOD.
 
     IF lt_json_items IS INITIAL.
       RAISE EXCEPTION TYPE cx_sy_conversion_no_date_time
-        EXPORTING value = 'JSON array is empty or invalid'.
+        EXPORTING
+          value = 'JSON array is empty or invalid'.
     ENDIF.
 
     LOOP AT lt_json_items INTO DATA(lv_item_json).
@@ -1037,39 +1041,39 @@ ENDMETHOD.
     ENDDO.
   ENDMETHOD.
 
-METHOD assign_hex_to_raw.
-  ASSIGN ca_record->* TO FIELD-SYMBOL(<ls_record>).
+  METHOD assign_hex_to_raw.
+    ASSIGN ca_record->* TO FIELD-SYMBOL(<ls_record>).
 
-  ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record>
-    TO FIELD-SYMBOL(<lv_target>).
-  IF sy-subrc <> 0. RETURN. ENDIF.
+    ASSIGN COMPONENT iv_fieldname OF STRUCTURE <ls_record>
+      TO FIELD-SYMBOL(<lv_target>).
+    IF sy-subrc <> 0. RETURN. ENDIF.
 
-  DATA lo_raw TYPE REF TO data.
+    DATA lo_raw TYPE REF TO data.
 
-  TRY.
-      DATA(lo_elem)    = CAST cl_abap_elemdescr(
-        cl_abap_typedescr=>describe_by_data( <lv_target> )
-      ).
-      DATA(lv_raw_len) = lo_elem->length.
+    TRY.
+        DATA(lo_elem)    = CAST cl_abap_elemdescr(
+          cl_abap_typedescr=>describe_by_data( <lv_target> )
+        ).
+        DATA(lv_raw_len) = lo_elem->length.
 
-      CREATE DATA lo_raw TYPE x LENGTH lv_raw_len.
-      ASSIGN lo_raw->* TO FIELD-SYMBOL(<lv_raw>).
+        CREATE DATA lo_raw TYPE x LENGTH lv_raw_len.
+        ASSIGN lo_raw->* TO FIELD-SYMBOL(<lv_raw>).
 
-      DO lv_raw_len TIMES.
-        DATA(lv_offset)   = ( sy-index - 1 ) * 2.
-        DATA(lv_byte_hex) = iv_hex+lv_offset(2).
-        DATA(lv_xstring)  = CONV xstring( lv_byte_hex ).
-        DATA lv_byte      TYPE x LENGTH 1.
-        lv_byte           = lv_xstring.
-        DATA(lv_pos)      = sy-index - 1.
-        <lv_raw>+lv_pos(1) = lv_byte.
-      ENDDO.
+        DO lv_raw_len TIMES.
+          DATA(lv_offset)   = ( sy-index - 1 ) * 2.
+          DATA(lv_byte_hex) = iv_hex+lv_offset(2).
+          DATA(lv_xstring)  = CONV xstring( lv_byte_hex ).
+          DATA lv_byte      TYPE x LENGTH 1.
+          lv_byte           = lv_xstring.
+          DATA(lv_pos)      = sy-index - 1.
+          <lv_raw>+lv_pos(1) = lv_byte.
+        ENDDO.
 
-      <lv_target> = <lv_raw>.
+        <lv_target> = <lv_raw>.
 
-    CATCH cx_root.
-  ENDTRY.
-ENDMETHOD.
+      CATCH cx_root.
+    ENDTRY.
+  ENDMETHOD.
 
   METHOD extract_json_value.
     DATA(lv_pattern) = |"{ iv_field_name }"|.
@@ -1110,7 +1114,8 @@ ENDMETHOD.
     ASSIGN lr_table->* TO <table>.
     IF <table> IS NOT ASSIGNED OR <table> IS INITIAL.
       RAISE EXCEPTION TYPE zcx_excel_pipeline
-        EXPORTING iv_text = |No record found for WHERE: { iv_where }|.
+        EXPORTING
+          iv_text = |No record found for WHERE: { iv_where }|.
     ENDIF.
 
     READ TABLE <table> INDEX 1 ASSIGNING FIELD-SYMBOL(<row>).
@@ -1443,7 +1448,7 @@ ENDMETHOD.
     ENDIF.
   ENDMETHOD.
 
-METHOD fill_timestamp_field.
+  METHOD fill_timestamp_field.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
     IF sy-subrc <> 0. RETURN. ENDIF.
 
@@ -1463,7 +1468,7 @@ METHOD fill_timestamp_field.
             " Field không tương thích với cả 2 cách gán -> thật sự không set được.
         ENDTRY.
     ENDTRY.
-ENDMETHOD.
+  ENDMETHOD.
 
 
   METHOD keep_old_field.
@@ -1478,7 +1483,7 @@ ENDMETHOD.
     IF sy-subrc = 0. TRY. <lv_new> = <lv_old>. CATCH cx_root. ENDTRY. ENDIF.
   ENDMETHOD.
 
-METHOD build_where_clause.
+  METHOD build_where_clause.
     ASSIGN ir_record->* TO FIELD-SYMBOL(<ls_record>).
 
     LOOP AT it_key_fields INTO DATA(lv_key_field).
@@ -1569,7 +1574,16 @@ METHOD build_where_clause.
   ENDMETHOD.
 
   METHOD validate_domain_values.
-    DATA(lo_desc) = get_struct_desc( iv_table_name ).
+    DATA lo_desc TYPE REF TO cl_abap_structdescr.
+    TRY.
+        lo_desc = get_struct_desc( iv_table_name ).
+      CATCH cx_static_check INTO DATA(lx_desc).
+        RAISE EXCEPTION TYPE zcx_excel_pipeline
+          EXPORTING
+            previous = lx_desc
+            iv_text  = |Cannot resolve structure for table { iv_table_name }: { lx_desc->get_text( ) }|.
+    ENDTRY.
+
     ASSIGN ir_record->* TO FIELD-SYMBOL(<record>).
     IF <record> IS NOT ASSIGNED.
       RETURN.
@@ -1942,7 +1956,7 @@ METHOD build_where_clause.
         ELSE rv_msg && `; ` && ls_error-message ).
     ENDLOOP.
   ENDMETHOD.
-METHOD compare_etag.
+  METHOD compare_etag.
     DATA(lo_type) = cl_abap_typedescr=>describe_by_data( iv_db_value ).
 
     TRY.
